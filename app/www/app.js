@@ -13,13 +13,15 @@
  *     always exists, so the fallback never runs there.
  *
  * SECURITY RULES (do not weaken):
- *   - The entered password lives in MEMORY ONLY (MsStudySession.password,
- *     a JS variable). It is NEVER written to localStorage, sessionStorage,
- *     the native session store, or any file. The native store holds only
- *     {deviceId, role} — no password, no expiry.
- *   - Fresh launch always asks for the password again (there is nothing
- *     stored to revalidate with). Within one run, revalidation uses the
- *     in-memory password every 15s + on resume.
+ *   - The entered password lives in MEMORY (MsStudySession.password, a JS
+ *     variable) AND encrypted natively (MsSessionStore, AES-256/GCM key
+ *     in the Android Keystore) since v1.0.3, so a fresh launch — including
+ *     after an app update — silently revalidates and skips the lock
+ *     screen. It is NEVER written to localStorage, sessionStorage, or
+ *     any file in plain text. The stored password is cleared on logout,
+ *     kick, or "incorrect".
+ *   - Within one run, revalidation uses the in-memory password every
+ *     15s + on resume.
  *   - NO download option for any content anywhere in the UI.
  *   - NO Google Sign-In / Drive key in the client (see drive.js).
  */
@@ -29,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 4;
+var CURRENT_VERSION_CODE = 5;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -227,6 +229,7 @@ function lockout(reason) {
   window.MsStudySession.password = '';
   window.MsStudySession.role = '';
   stopRevalidation();
+  stopChat();
   $('activeChip').hidden = true;
   $('adminBtn').hidden = true;
   var plugin = capPlugin('MsAccess');
@@ -801,7 +804,7 @@ $('upVideoBtn').addEventListener('click', function () {
   handleUpload('video', 'upVideoTitle', 'upVideoFile', 'upVideoSection', 'upVideoStatus', 'upVideoBtn');
 });
 
-/* ================= Hidden chat entry (lock only — real chat = Phase 5) ================= */
+/* ================= Hidden chat entry + real chat ================= */
 /* The chat code is the pairing key, so it must survive app updates.
  * It lives in the native encrypted store (like the password), NOT in
  * WebView localStorage. localStorage is kept only as a fallback, and a
@@ -839,8 +842,10 @@ async function setStoredChatCode(code) {
 }
 
 async function openChatLock() {
+  stopChat();
   var hasCode = await getStoredChatCode();
   $('chatLockError').hidden = true;
+  $('chatLockStatus').textContent = '';
   $('chatCodeInput').value = '';
   $('chatCodeConfirm').value = '';
   if (hasCode) {
@@ -882,34 +887,406 @@ function armLongPress() {
 $('chatLockBtn').addEventListener('click', async function () {
   var code = ($('chatCodeInput').value || '').trim();
   if (!code) { return; }
-  var stored = await getStoredChatCode();
-  if (!stored) {
-    var confirmCode = ($('chatCodeConfirm').value || '').trim();
-    if (code !== confirmCode) {
+  var btn = $('chatLockBtn');
+  btn.disabled = true;
+  $('chatLockStatus').textContent = '';
+  try {
+    var stored = await getStoredChatCode();
+    if (!stored) {
+      var confirmCode = ($('chatCodeConfirm').value || '').trim();
+      if (code !== confirmCode) {
+        $('chatLockError').hidden = false;
+        $('chatLockCard').classList.remove('shake');
+        void $('chatLockCard').offsetWidth;
+        $('chatLockCard').classList.add('shake');
+        return;
+      }
+      await setStoredChatCode(code);
+    } else if (code !== stored) {
       $('chatLockError').hidden = false;
       $('chatLockCard').classList.remove('shake');
       void $('chatLockCard').offsetWidth;
       $('chatLockCard').classList.add('shake');
       return;
     }
-    await setStoredChatCode(code);
+    /* Code is correct — join the room on the server before opening it.
+     * A first-time code creates the room; the same code on a second
+     * device joins the same room (max 2). */
+    $('chatLockStatus').textContent = 'Joining…';
+    var joined = await joinChat(code);
+    if (!joined.ok) {
+      $('chatLockStatus').textContent =
+        (joined.reason === 'full') ? 'This code is already in use.' : 'Try again.';
+      return;
+    }
     showScreen('screen-chat');
-    return;
-  }
-  if (code === stored) {
-    showScreen('screen-chat');
-  } else {
-    $('chatLockError').hidden = false;
-    $('chatLockCard').classList.remove('shake');
-    void $('chatLockCard').offsetWidth;
-    $('chatLockCard').classList.add('shake');
+    startChat();
+  } catch (e) {
+    /* apiCall already locks out on an auth failure; anything else is
+     * a transient failure while still on the lock screen. */
+    $('chatLockStatus').textContent = 'Try again.';
+  } finally {
+    btn.disabled = false;
   }
 });
 $('chatCodeInput').addEventListener('keydown', function (ev) {
   if (ev.key === 'Enter') { $('chatLockBtn').click(); }
 });
 $('chatLockBackBtn').addEventListener('click', function () { showScreen('screen-home'); });
-$('chatBackBtn').addEventListener('click', function () { showScreen('screen-home'); });
+
+/* ================= Hidden chat ================= */
+/* Text chat only. Polls /chat/messages every 5s while open. */
+var chatState = {
+  code: null,
+  roomId: null,
+  myDeviceId: '',
+  messages: [],   // [{id, room_id, sender_device, body, reply_to, created_at}]
+  byId: {},
+  members: [],
+  presence: [],
+  pollTimer: null,
+  pollBusy: false,
+  sending: false,
+  replyTo: null,
+  menuMsgId: null
+};
+
+/* Join (or create) the room for this code. The device id IS the member
+ * identity, so make sure it is populated first. */
+async function joinChat(code) {
+  var info = await getDeviceInfo();
+  window.MsStudySession.deviceId = info.deviceId;
+  chatState.myDeviceId = info.deviceId;
+  var data = await apiCall('/chat/join', { code: code });
+  if (!data || data.result === 'full') { return { ok: false, reason: 'full' }; }
+  if (!data || data.result !== 'ok') { return { ok: false, reason: 'retry' }; }
+  chatState.code = code;
+  chatState.roomId = data.roomId || null;
+  chatState.members = data.members || [];
+  chatState.presence = data.presence || [];
+  return { ok: true };
+}
+
+function stopChatPolling() {
+  if (chatState.pollTimer) { clearInterval(chatState.pollTimer); chatState.pollTimer = null; }
+}
+
+function stopChat() {
+  stopChatPolling();
+  chatState.code = null;
+  chatState.roomId = null;
+  chatState.messages = [];
+  chatState.byId = {};
+  chatState.members = [];
+  chatState.presence = [];
+  chatState.replyTo = null;
+  chatState.menuMsgId = null;
+  chatState.sending = false;
+  chatState.pollBusy = false;
+}
+
+function startChat() {
+  chatState.messages = [];
+  chatState.byId = {};
+  chatState.replyTo = null;
+  chatState.sending = false;
+  chatState.pollBusy = false;
+  hideReplyBar();
+  $('chatStatus').textContent = '';
+  $('chatInput').value = '';
+  $('chatMenu').hidden = true;
+  renderChatMessages('always');
+  renderChatPresence();
+  loadChatMessages(true);
+  stopChatPolling();
+  chatState.pollTimer = setInterval(function () { loadChatMessages(false); }, 5000);
+}
+
+function formatChatTime(ts) {
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) { return ''; }
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatLastSeen(ts) {
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) { return 'Last seen recently'; }
+  var now = new Date();
+  if (d.toDateString() === now.toDateString()) {
+    return 'Last seen ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return 'Last seen ' + d.toLocaleDateString([], { day: 'numeric', month: 'short' }) +
+    ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function chatListAtBottom() {
+  var list = $('chatList');
+  return (list.scrollHeight - list.scrollTop - list.clientHeight) < 60;
+}
+
+function renderChatMessages(scroll) {
+  var list = $('chatList');
+  var atBottom = chatListAtBottom();
+  if (!chatState.messages.length) {
+    list.innerHTML = '<p class="muted small" style="text-align:center;padding-top:24px;">No messages yet.</p>';
+    return;
+  }
+  var html = '';
+  chatState.messages.forEach(function (m) {
+    var mine = (m.sender_device === chatState.myDeviceId);
+    var quote = '';
+    if (m.reply_to && chatState.byId[m.reply_to]) {
+      quote = '<div class="msg-quote">' + esc(chatState.byId[m.reply_to].body || '') + '</div>';
+    }
+    html += '<div class="msg ' + (mine ? 'msg-mine' : 'msg-theirs') + '" data-msg="' + esc(m.id) + '">' +
+      quote + '<div class="msg-body">' + esc(m.body || '') + '</div>' +
+      '<span class="msg-time">' + esc(formatChatTime(m.created_at)) + '</span></div>';
+  });
+  list.innerHTML = html;
+  if (scroll === 'always' || atBottom) { list.scrollTop = list.scrollHeight; }
+}
+
+function renderChatPresence() {
+  var dot = $('chatPresenceDot');
+  var text = $('chatPresenceText');
+  var other = null;
+  (chatState.members || []).forEach(function (m) {
+    if (m !== chatState.myDeviceId) { other = m; }
+  });
+  if (!other) {
+    dot.classList.remove('on');
+    text.textContent = 'Waiting for the other person.';
+    return;
+  }
+  var p = null;
+  (chatState.presence || []).forEach(function (x) {
+    if (x.deviceId === other) { p = x; }
+  });
+  if (p && p.online) {
+    dot.classList.add('on');
+    text.textContent = 'Online';
+  } else {
+    dot.classList.remove('on');
+    text.textContent = (p && p.lastSeen) ? formatLastSeen(p.lastSeen) : 'Offline';
+  }
+}
+
+async function loadChatMessages(initial) {
+  if (!chatState.code || chatState.pollBusy) { return; }
+  chatState.pollBusy = true;
+  try {
+    var since = null;
+    if (!initial && chatState.messages.length) {
+      since = chatState.messages[chatState.messages.length - 1].created_at;
+    }
+    var data = await apiCall('/chat/messages', { code: chatState.code, since: since });
+    if (data && data.result === 'not-joined') {
+      stopChat();
+      $('chatLockStatus').textContent = 'Open the chat again.';
+      openChatLock();
+      return;
+    }
+    if (data && data.result === 'ok') {
+      if (data.members) { chatState.members = data.members; }
+      if (data.presence) { chatState.presence = data.presence; }
+      var added = 0;
+      (data.messages || []).forEach(function (m) {
+        if (m && m.id && !chatState.byId[m.id]) {
+          chatState.byId[m.id] = m;
+          chatState.messages.push(m);
+          added++;
+        }
+      });
+      if (added) {
+        chatState.messages.sort(function (a, b) {
+          return new Date(a.created_at) - new Date(b.created_at);
+        });
+        renderChatMessages(initial ? 'always' : true);
+      }
+      renderChatPresence();
+    }
+  } catch (e) {
+    /* Transient poll failure — keep polling. apiCall already locks
+     * out on an auth failure. */
+  } finally {
+    chatState.pollBusy = false;
+  }
+}
+
+async function sendChatMessage() {
+  if (!chatState.code || chatState.sending) { return; }
+  var text = ($('chatInput').value || '').trim();
+  if (!text) { return; }
+  text = text.slice(0, 2000);
+  var btn = $('chatSendBtn');
+  chatState.sending = true;
+  btn.disabled = true;
+  $('chatStatus').textContent = '';
+  try {
+    var data = await apiCall('/chat/send', { code: chatState.code, text: text, replyTo: chatState.replyTo });
+    if (data && data.result === 'not-joined') {
+      stopChat();
+      $('chatLockStatus').textContent = 'Open the chat again.';
+      openChatLock();
+      return;
+    }
+    if (data && data.result === 'ok' && data.message) {
+      var m = data.message;
+      if (!chatState.byId[m.id]) {
+        chatState.byId[m.id] = m;
+        chatState.messages.push(m);
+        chatState.messages.sort(function (a, b) {
+          return new Date(a.created_at) - new Date(b.created_at);
+        });
+      }
+      $('chatInput').value = '';
+      hideReplyBar();
+      renderChatMessages('always');
+    } else {
+      $('chatStatus').textContent = 'Try again.';
+    }
+  } catch (e) {
+    $('chatStatus').textContent = e.message || 'Try again.';
+  } finally {
+    chatState.sending = false;
+    btn.disabled = false;
+  }
+}
+
+function showReplyBar(msgId) {
+  var m = chatState.byId[msgId];
+  if (!m) { return; }
+  chatState.replyTo = msgId;
+  $('chatReplyText').textContent = 'Replying to: ' + (m.body || '').slice(0, 40);
+  $('chatReplyBar').hidden = false;
+  $('chatInput').focus();
+}
+
+function hideReplyBar() {
+  chatState.replyTo = null;
+  $('chatReplyBar').hidden = true;
+}
+
+async function deleteChatMessage(msgId) {
+  if (!chatState.code || !msgId) { return; }
+  try {
+    var data = await apiCall('/chat/delete', { code: chatState.code, messageId: msgId });
+    if (data && data.result === 'not-joined') {
+      stopChat();
+      $('chatLockStatus').textContent = 'Open the chat again.';
+      openChatLock();
+      return;
+    }
+    if (data && data.result === 'ok') {
+      delete chatState.byId[msgId];
+      chatState.messages = chatState.messages.filter(function (m) { return m.id !== msgId; });
+      if (chatState.replyTo === msgId) { hideReplyBar(); }
+      renderChatMessages();
+    } else {
+      $('chatStatus').textContent = 'Try again.';
+    }
+  } catch (e) {
+    $('chatStatus').textContent = e.message || 'Try again.';
+  }
+}
+
+function openChatMsgMenu(msgId) {
+  chatState.menuMsgId = msgId;
+  $('chatMsgMenu').hidden = false;
+}
+
+function closeChatMsgMenu() {
+  chatState.menuMsgId = null;
+  $('chatMsgMenu').hidden = true;
+}
+
+/* Composer */
+$('chatSendBtn').addEventListener('click', sendChatMessage);
+$('chatInput').addEventListener('keydown', function (ev) {
+  if (ev.key === 'Enter') { sendChatMessage(); }
+});
+$('chatReplyCancel').addEventListener('click', hideReplyBar);
+$('chatBackBtn').addEventListener('click', function () {
+  stopChat();
+  showScreen('screen-home');
+});
+
+/* Long-press a message: Reply / Delete menu (touch + mouse). */
+var chatLpTimer = null;
+function cancelChatLongPress() {
+  if (chatLpTimer) { clearTimeout(chatLpTimer); chatLpTimer = null; }
+}
+function armChatLongPress(msgId) {
+  cancelChatLongPress();
+  chatLpTimer = setTimeout(function () {
+    chatLpTimer = null;
+    openChatMsgMenu(msgId);
+  }, 500);
+}
+$('chatList').addEventListener('touchstart', function (ev) {
+  var b = ev.target.closest('[data-msg]');
+  if (b) { armChatLongPress(b.getAttribute('data-msg')); }
+}, { passive: true });
+$('chatList').addEventListener('touchend', cancelChatLongPress, { passive: true });
+$('chatList').addEventListener('touchmove', cancelChatLongPress, { passive: true });
+$('chatList').addEventListener('touchcancel', cancelChatLongPress, { passive: true });
+$('chatList').addEventListener('mousedown', function (ev) {
+  var b = ev.target.closest('[data-msg]');
+  if (b) { armChatLongPress(b.getAttribute('data-msg')); }
+});
+$('chatList').addEventListener('mouseup', cancelChatLongPress);
+$('chatList').addEventListener('mouseleave', cancelChatLongPress);
+$('chatList').addEventListener('contextmenu', function (ev) {
+  var b = ev.target.closest('[data-msg]');
+  if (b) {
+    ev.preventDefault();
+    cancelChatLongPress();
+    openChatMsgMenu(b.getAttribute('data-msg'));
+  }
+});
+
+$('chatMsgReplyBtn').addEventListener('click', function () {
+  var id = chatState.menuMsgId;
+  closeChatMsgMenu();
+  if (id) { showReplyBar(id); }
+});
+$('chatMsgDeleteBtn').addEventListener('click', function () {
+  var id = chatState.menuMsgId;
+  closeChatMsgMenu();
+  if (id) { deleteChatMessage(id); }
+});
+$('chatMsgMenuCancel').addEventListener('click', closeChatMsgMenu);
+$('chatMsgMenu').addEventListener('click', function (ev) {
+  if (ev.target === $('chatMsgMenu')) { closeChatMsgMenu(); }
+});
+
+/* 3-dot menu: Change code */
+$('chatMenuBtn').addEventListener('click', function (ev) {
+  ev.stopPropagation();
+  $('chatMenu').hidden = !$('chatMenu').hidden;
+});
+document.addEventListener('click', function (ev) {
+  var menu = $('chatMenu');
+  if (menu && !menu.hidden && !ev.target.closest('#chatMenu') && !ev.target.closest('#chatMenuBtn')) {
+    menu.hidden = true;
+  }
+});
+$('chatChangeCodeBtn').addEventListener('click', async function () {
+  $('chatMenu').hidden = true;
+  if (!chatState.code) { return; }
+  if (!window.confirm('Change code? This deletes the chat for both people.')) { return; }
+  try {
+    await apiCall('/chat/change-code', { code: chatState.code });
+  } catch (e) {
+    $('chatStatus').textContent = e.message || 'Try again.';
+    return;
+  }
+  var plugin = chatPlugin();
+  if (plugin && plugin.clearChatCode) { try { await plugin.clearChatCode(); } catch (e) {} }
+  try { window.localStorage.removeItem(CHAT_CODE_KEY); } catch (e) {}
+  stopChat();
+  openChatLock();
+});
 
 /* ================= In-app update ================= */
 async function checkForUpdate() {

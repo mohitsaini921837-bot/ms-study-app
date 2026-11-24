@@ -229,16 +229,36 @@
         </div>
         <button class="btn-primary" id="chatLockBtn" type="button">Open chat</button>
       </div>
+      <p class="muted small" id="chatLockStatus"></p>
       <button class="btn-ghost" id="chatLockBackBtn" type="button">← Back</button>
     </div>
   </section>
 
-  <!-- ================= Hidden chat — placeholder (real chat = Phase 5) ================= -->
+  <!-- ================= Hidden chat ================= -->
   <section class="screen" id="screen-chat" hidden>
-    <div class="card empty-state">
-      <div class="empty-icon">💬</div>
-      <h2>Chat</h2>
-      <button class="btn-secondary" id="chatBackBtn" type="button">Back to Home</button>
+    <div class="chat-wrap">
+      <div class="chat-head">
+        <button class="btn-ghost" id="chatBackBtn" type="button">← Back</button>
+        <div class="chat-peer">
+          <div class="chat-title">Chat</div>
+          <div class="chat-presence"><span class="presence-dot" id="chatPresenceDot"></span><span id="chatPresenceText"></span></div>
+        </div>
+        <button class="icon-btn" id="chatMenuBtn" type="button" title="Menu">⋮</button>
+      </div>
+      <div class="chat-menu" id="chatMenu" hidden>
+        <button class="chat-menu-item chat-menu-danger" id="chatChangeCodeBtn" type="button">Change code</button>
+      </div>
+      <div class="chat-list" id="chatList"></div>
+      <div class="chat-reply" id="chatReplyBar" hidden>
+        <span class="chat-reply-text" id="chatReplyText"></span>
+        <button class="chat-reply-x" id="chatReplyCancel" type="button" aria-label="Cancel reply">✕</button>
+      </div>
+      <p class="muted small" id="chatStatus"></p>
+      <div class="chat-composer">
+        <input class="field-input chat-input" id="chatInput" type="text" placeholder="Message"
+               autocomplete="off" autocapitalize="sentences" spellcheck="false" />
+        <button class="btn-primary chat-send" id="chatSendBtn" type="button">Send</button>
+      </div>
     </div>
   </section>
 
@@ -263,6 +283,15 @@
       <button class="btn-ghost" id="updateLaterBtn" type="button">Later</button>
     </div>
     <p class="muted small" id="updateStatus"></p>
+  </div>
+</div>
+
+<!-- ================= Chat message menu (long-press) ================= -->
+<div class="dialog-overlay" id="chatMsgMenu" hidden>
+  <div class="card dialog-card">
+    <button class="btn-secondary chat-menu-action" id="chatMsgReplyBtn" type="button">Reply</button>
+    <button class="btn-secondary chat-menu-action chat-menu-danger" id="chatMsgDeleteBtn" type="button">Delete</button>
+    <button class="btn-ghost" id="chatMsgMenuCancel" type="button">Cancel</button>
   </div>
 </div>
 
