@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 8;
+var CURRENT_VERSION_CODE = 9;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -102,7 +102,7 @@ async function getDeviceInfo() {
 
 /* ================= Screens / router ================= */
 var MAIN_SCREENS = ['screen-home', 'screen-notes', 'screen-tests', 'screen-practice', 'screen-classes', 'screen-admin'];
-var ALL_SCREENS = MAIN_SCREENS.concat(['screen-lock', 'screen-chat-lock', 'screen-chat']);
+var ALL_SCREENS = MAIN_SCREENS.concat(['screen-lock', 'screen-chat-lock', 'screen-chat', 'screen-take']);
 
 function showScreen(id) {
   ALL_SCREENS.forEach(function (s) {
@@ -624,8 +624,7 @@ async function refreshSavedTests() {
 $('savedTestsList').addEventListener('click', function (ev) {
   var b = ev.target.closest('[data-test]');
   if (!b) { return; }
-  $('testDetail').textContent = b.getAttribute('data-title') + ' — ' +
-    b.getAttribute('data-q') + ' questions · ' + b.getAttribute('data-m') + ' min';
+  openTest(b.getAttribute('data-test'));
 });
 
 $('testType').addEventListener('change', function () {
@@ -678,6 +677,174 @@ $('testGenerateBtn').addEventListener('click', async function () {
   } finally {
     btn.disabled = false;
   }
+});
+
+/* ================= Take a test ================= */
+/* One question at a time, countdown from duration_min, score computed
+ * locally, full review after submit. The result is sent to the server
+ * fire-and-forget — a failed submit never blocks the result screen. */
+var takeState = null;
+
+function takeFormatTime(sec) {
+  var m = Math.floor(sec / 60);
+  var s = sec % 60;
+  return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function stopTakeTimer() {
+  if (takeState && takeState.timer) { clearInterval(takeState.timer); takeState.timer = null; }
+}
+
+function takeRenderTimer() {
+  var el = $('takeTimer');
+  if (!el || !takeState) { return; }
+  el.textContent = 'Time left: ' + takeFormatTime(Math.max(0, takeState.remainingSec));
+  el.classList.toggle('take-timer-low', takeState.remainingSec <= 60);
+}
+
+function takeRenderQuestion() {
+  var st = takeState;
+  if (!st) { return; }
+  var q = st.questions[st.idx];
+  $('takeProgress').textContent = 'Question ' + (st.idx + 1) + ' of ' + st.questions.length;
+  $('takeQuestion').textContent = q.question || '';
+  var letters = ['A', 'B', 'C', 'D'];
+  var html = '';
+  (q.options || []).forEach(function (opt, i) {
+    html += '<button type="button" class="take-option' + (st.answers[st.idx] === i ? ' selected' : '') +
+      '" data-opt="' + i + '">' + esc(letters[i] + '. ' + (opt || '')) + '</button>';
+  });
+  $('takeOptions').innerHTML = html;
+  $('takePrevBtn').disabled = (st.idx === 0);
+  var last = (st.idx === st.questions.length - 1);
+  $('takeNextBtn').textContent = last ? 'Submit' : 'Next';
+}
+
+async function openTest(testId) {
+  $('testDetail').textContent = 'Loading…';
+  try {
+    var data = await apiCall('/tests/questions', { testId: testId });
+    var questions = (data && data.questions) || [];
+    var test = (data && data.test) || {};
+    if (!questions.length) { $('testDetail').textContent = 'Try again.'; return; }
+    stopTakeTimer();
+    takeState = {
+      test: test,
+      questions: questions,
+      idx: 0,
+      answers: questions.map(function () { return -1; }),
+      remainingSec: Math.max(1, (parseInt(test.duration_min, 10) || 10) * 60),
+      timer: null,
+      submitted: false
+    };
+    $('takeTitle').textContent = test.title || 'Test';
+    $('takeBody').hidden = false;
+    $('takeResult').hidden = true;
+    $('testDetail').textContent = '';
+    showScreen('screen-take');
+    takeRenderTimer();
+    takeRenderQuestion();
+    takeState.timer = setInterval(function () {
+      if (!takeState || takeState.submitted) { return; }
+      takeState.remainingSec -= 1;
+      takeRenderTimer();
+      if (takeState.remainingSec <= 0) { submitTake(); }
+    }, 1000);
+  } catch (e) {
+    $('testDetail').textContent = e.message || 'Try again.';
+  }
+}
+
+function submitTakeResult(score, total) {
+  // Same body as apiCall, but a plain fetch: a failed submit must never
+  // lock the user out of the result screen or show an error.
+  if (!takeState) { return; }
+  var payload = {
+    testId: takeState.test.id,
+    score: score,
+    total: total,
+    answers: takeState.answers.slice()
+  };
+  (async function () {
+    try {
+      if (!window.MsStudySession.deviceId) {
+        var dinfo = await getDeviceInfo();
+        window.MsStudySession.deviceId = dinfo.deviceId;
+        window.MsStudySession.deviceLabel = dinfo.deviceLabel;
+      }
+      var body = { password: window.MsStudySession.password, deviceId: window.MsStudySession.deviceId };
+      Object.keys(payload).forEach(function (k) { body[k] = payload[k]; });
+      await fetch(SERVER_URL + '/tests/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(body)
+      });
+    } catch (e) { /* fire-and-forget: ignore */ }
+  })();
+}
+
+function submitTake() {
+  var st = takeState;
+  if (!st || st.submitted) { return; }
+  st.submitted = true;
+  stopTakeTimer();
+  var letters = ['A', 'B', 'C', 'D'];
+  var score = 0;
+  var html = '';
+  st.questions.forEach(function (q, i) {
+    var chosen = st.answers[i];
+    var correct = (typeof q.answer_index === 'number') ? q.answer_index : -1;
+    var ok = (chosen !== -1 && chosen === correct);
+    if (ok) { score += 1; }
+    html += '<div class="take-review-item">' +
+      '<p class="take-review-q">' + esc((i + 1) + '. ' + (q.question || '')) + '</p>' +
+      '<p class="take-review-line ' + (ok ? 'take-correct' : 'take-wrong') + '">' +
+      (ok ? '✓ Correct' : '✗ Wrong') + '</p>' +
+      '<p class="take-review-line">Your answer: ' + esc(chosen === -1 ? 'Not answered' : (letters[chosen] + '. ' + ((q.options || [])[chosen] || ''))) + '</p>' +
+      '<p class="take-review-line">Correct answer: ' + esc(correct === -1 ? '—' : (letters[correct] + '. ' + ((q.options || [])[correct] || ''))) + '</p>' +
+      (q.explanation ? '<p class="take-review-line take-explain">' + esc(q.explanation) + '</p>' : '') +
+      '</div>';
+  });
+  $('takeScore').textContent = 'You scored ' + score + ' out of ' + st.questions.length + '.';
+  $('takeReview').innerHTML = html;
+  $('takeBody').hidden = true;
+  $('takeResult').hidden = false;
+  submitTakeResult(score, st.questions.length);
+}
+
+$('takeOptions').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-opt]');
+  if (!b || !takeState || takeState.submitted) { return; }
+  takeState.answers[takeState.idx] = parseInt(b.getAttribute('data-opt'), 10);
+  takeRenderQuestion();
+});
+
+$('takePrevBtn').addEventListener('click', function () {
+  if (!takeState || takeState.submitted || takeState.idx === 0) { return; }
+  takeState.idx -= 1;
+  takeRenderQuestion();
+});
+
+$('takeNextBtn').addEventListener('click', function () {
+  if (!takeState || takeState.submitted) { return; }
+  if (takeState.idx === takeState.questions.length - 1) { submitTake(); return; }
+  takeState.idx += 1;
+  takeRenderQuestion();
+});
+
+$('takeSubmitBtn').addEventListener('click', function () {
+  submitTake();
+});
+
+$('takeBackBtn').addEventListener('click', function () {
+  stopTakeTimer();
+  takeState = null;
+  showScreen('screen-tests');
+});
+
+$('takeDoneBtn').addEventListener('click', function () {
+  takeState = null;
+  showScreen('screen-tests');
 });
 
 /* ================= Admin ================= */

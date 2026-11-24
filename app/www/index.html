@@ -111,6 +111,32 @@
     </div>
   </section>
 
+  <!-- ================= Take test ================= -->
+  <section class="screen" id="screen-take" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="takeBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="takeTitle"></h2>
+    <p class="muted small" id="takeTimer"></p>
+
+    <div id="takeBody">
+      <p class="muted small" id="takeProgress"></p>
+      <p id="takeQuestion"></p>
+      <div id="takeOptions"></div>
+      <div class="take-nav">
+        <button class="btn-secondary" id="takePrevBtn" type="button">Previous</button>
+        <button class="btn-primary" id="takeNextBtn" type="button">Next</button>
+      </div>
+      <button class="btn-secondary take-submit" id="takeSubmitBtn" type="button">Submit</button>
+    </div>
+
+    <div id="takeResult" hidden>
+      <p id="takeScore"></p>
+      <div id="takeReview"></div>
+      <button class="btn-primary" id="takeDoneBtn" type="button">Back to tests</button>
+    </div>
+  </section>
+
   <!-- ================= Practice ================= -->
   <section class="screen" id="screen-practice" hidden>
     <div class="section-head"><h2>Practice</h2></div>
