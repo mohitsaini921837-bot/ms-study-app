@@ -84,7 +84,7 @@ jobs:
 
       - name: Build signed release APK
         run: |
-          gradle :app:assembleRelease --stacktrace \
+          gradle -p android :app:assembleRelease --stacktrace \
             -Pmsstudy.keystore.file="$PWD/android/msstudy-release.keystore" \
             -Pmsstudy.keystore.password="${{ secrets.KEYSTORE_PASSWORD }}" \
             -Pmsstudy.key.alias="${{ secrets.KEY_ALIAS }}" \
