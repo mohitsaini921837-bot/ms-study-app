@@ -96,12 +96,6 @@
       <p class="muted small" id="testDetail"></p>
     </div>
 
-    <div class="card">
-      <h3>Folders</h3>
-      <div class="crumb" id="testsCrumb"></div>
-      <div class="browser-create" id="testsCreate" hidden></div>
-      <div id="testsList"></div>
-    </div>
   </section>
 
   <!-- ================= Take test ================= -->
@@ -149,6 +143,7 @@
 
     <div class="card">
       <h3>Create password</h3>
+      <input class="field-input" id="adminCustomPw" type="text" placeholder="Custom password (empty = random)" maxlength="32" autocomplete="off">
       <button class="btn-primary btn-glass-color" id="adminCreateBtn" type="button">Create password</button>
       <div class="code-card" id="adminCreateResult" hidden>
         <div class="code-label">New password</div>
@@ -224,6 +219,24 @@
 
 </main>
 
+<!-- ================= In-app PDF viewer (FIX 7, v1.0.12) ================= -->
+  <section class="viewer-screen" id="screen-viewer" hidden>
+    <div class="viewer-bar">
+      <button class="btn-ghost" id="viewerCloseBtn" type="button">← Back</button>
+      <span class="viewer-title" id="viewerTitle"></span>
+    </div>
+    <div class="viewer-canvas-wrap" id="viewerWrap">
+      <canvas id="viewerCanvas" hidden></canvas>
+      <img id="viewerImg" alt="" hidden>
+      <p class="muted" id="viewerError" hidden>Could not open this file.</p>
+    </div>
+    <div class="viewer-nav" id="viewerNav" hidden>
+      <button class="btn-secondary" id="viewerPrevBtn" type="button">Previous</button>
+      <span class="viewer-page" id="viewerPageLabel"></span>
+      <button class="btn-secondary" id="viewerNextBtn" type="button">Next</button>
+    </div>
+  </section>
+
 <!-- ================= Bottom nav (floating frosted glass) ================= -->
 <nav class="bottom-nav" id="bottomNav" hidden>
   <button class="nav-btn active" id="navNotes" type="button" data-screen="screen-notes"><span class="nav-icon">📚</span><span class="nav-label">Notes</span></button>
@@ -281,6 +294,7 @@
 <!-- ================= Toast ================= -->
 <div class="toast" id="toast" hidden></div>
 
+<script src="vendor/pdfjs/pdf.min.js"></script>
 <script src="drive.js"></script>
 <script src="app.js"></script>
 </body>

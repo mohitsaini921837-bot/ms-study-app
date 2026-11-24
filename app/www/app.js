@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 12;
+var CURRENT_VERSION_CODE = 13;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -104,7 +104,10 @@ async function getDeviceInfo() {
 var MAIN_SCREENS = ['screen-notes', 'screen-tests', 'screen-practice', 'screen-admin'];
 var ALL_SCREENS = MAIN_SCREENS.concat(['screen-lock', 'screen-chat-lock', 'screen-chat', 'screen-take']);
 
+var currentScreenId = 'screen-notes'; // FIX 10 (v1.0.12): tracked for live refresh
+
 function showScreen(id) {
+  currentScreenId = id;
   ALL_SCREENS.forEach(function (s) {
     var el = $(s);
     if (el) { el.hidden = (s !== id); }
@@ -116,18 +119,166 @@ function showScreen(id) {
     btn.classList.toggle('active', btn.getAttribute('data-screen') === id);
   });
   window.scrollTo(0, 0);
-  // Lazy-load the screen's data when it is shown.
+  // Lazy-load the screen's data when it is shown (FIX 10: every tab
+  // switch re-fetches, so a change from another device appears at once).
   if (id === 'screen-notes') { notesBrowser.load(); }
   else if (id === 'screen-practice') { practiceBrowser.load(); }
   else if (id === 'screen-tests') { refreshTestsScreen(); }
+  else if (id === 'screen-admin') { refreshAdminPasswords(); }
 }
 
 document.querySelectorAll('.nav-btn').forEach(function (btn) {
   btn.addEventListener('click', function () {
     if (!authed) { return; }
+    // FIX 12: a lateral tab switch clears the back stack — the user is
+    // starting a fresh top-level context, not going deeper.
+    clearBackStack();
     showScreen(btn.getAttribute('data-screen'));
   }, { passive: true });
 });
+
+/* ================= Live update (FIX 10, v1.0.12) =================
+ * Everything updates live — no close/reopen. The current screen re-fetches
+ * on every tab switch (see showScreen), on resume (visibilitychange), on a
+ * background poll, and immediately after every mutation (each create /
+ * upload / delete / generate / submit handler already re-loads its list).
+ * The poll is SILENT (no spinners, no toasts, no scroll reset, open
+ * sections stay open) and only polls the currently visible screen, only
+ * while the app is open (never on the lock screen). The admin screen is
+ * refreshed on entry and after create/delete — it needs no poll.
+ * POLL INTERVAL (user order 2026-11-24 20:24 IST): 0.5 seconds (500ms),
+ * chained with setTimeout AFTER each fetch completes (never overlapping).
+ * If a poll fails, it backs off silently to 5s and returns to 0.5s on the
+ * next success — never an error to the user for a background poll. */
+function refreshCurrentScreen(silent) {
+  if (currentScreenId === 'screen-notes') { return notesBrowser.load(silent); }
+  if (currentScreenId === 'screen-practice') { return practiceBrowser.load(silent); }
+  if (currentScreenId === 'screen-tests') { return refreshSavedTests(silent); }
+  return Promise.resolve();
+}
+
+var livePollTimer = null;
+var livePollDelay = 500;
+
+function scheduleLivePoll(delay) {
+  if (livePollTimer) { clearTimeout(livePollTimer); }
+  livePollTimer = setTimeout(runLivePoll, delay);
+}
+
+async function runLivePoll() {
+  livePollTimer = null;
+  if (!authed) { return; }
+  try {
+    await refreshCurrentScreen(true);
+    livePollDelay = 500; // success: back to 0.5s
+  } catch (e) {
+    livePollDelay = 5000; // failure: back off silently to 5s
+  }
+  scheduleLivePoll(livePollDelay);
+}
+
+function startLivePoll() {
+  stopLivePoll();
+  livePollDelay = 500;
+  scheduleLivePoll(500);
+}
+
+function stopLivePoll() {
+  if (livePollTimer) { clearTimeout(livePollTimer); livePollTimer = null; }
+}
+
+/* Refresh the current screen when the app comes back to the foreground. */
+document.addEventListener('visibilitychange', function () {
+  if (!document.hidden && authed) {
+    refreshCurrentScreen(true).catch(function () { /* silent */ });
+  }
+});
+
+/* ================= Android back button (FIX 12, v1.0.12) =================
+ * The phone's back button goes back ONE step at a time, never closing
+ * everything at once. A simple back stack records each deeper step
+ * (viewer, palette, choice dialog, chat menu, take test, admin, chat);
+ * one press pops one entry and undoes it. Folder/section navigation is
+ * hierarchical with breadcrumb jumps, so it is handled from the live state
+ * (collapse an open section, then go up one folder level) instead of a
+ * recorded stack — a recorded stack would drift on a breadcrumb jump and
+ * could go FORWARD instead of back. The observable behaviour is exactly
+ * the required priority order:
+ *   1. overlay open (viewer / palette / dialog / menu) -> close only it
+ *   2. section open or inside a folder -> back one level
+ *   3. sub-screen (take / admin / chat) -> back to the main screen
+ *   4. main tab at the top level, nothing open -> exit the app
+ * The in-app upper-corner back buttons call the same goBackOneStep(), so
+ * both back paths always agree. */
+var backStack = [];
+function pushBack(entry) { backStack.push(entry); }
+function popBack() { return backStack.pop() || null; }
+function clearBackStack() { backStack = []; }
+/* Remove the most recent entry of a kind (used when an overlay is closed
+ * directly, e.g. by its own close button, so no stale entry remains). */
+function removeBackEntry(kind) {
+  for (var i = backStack.length - 1; i >= 0; i -= 1) {
+    if (backStack[i].kind === kind) { backStack.splice(i, 1); return; }
+  }
+}
+
+function goBackOneStep() {
+  var entry = popBack();
+  if (entry && typeof entry.undo === 'function') {
+    entry.undo();
+    return;
+  }
+  goBackByState();
+}
+
+function goBackByState() {
+  // Not signed in (lock screen): there is nowhere to go back to.
+  if (!authed) { exitApp(); return; }
+  // 1. Any overlay still open? Close only it.
+  if ($('screen-viewer') && !$('screen-viewer').hidden) { closeViewer(); return; }
+  if ($('takePalette') && !$('takePalette').hidden) { closeTakePalette(); return; }
+  if ($('testChoiceDialog') && !$('testChoiceDialog').hidden) { closeTestChoice(); return; }
+  if ($('chatMsgMenu') && !$('chatMsgMenu').hidden) { closeChatMsgMenu(); return; }
+  // 2. A sub-screen? Back to the main screen it came from.
+  if (currentScreenId === 'screen-take') { exitTakeScreen(); return; }
+  if (currentScreenId === 'screen-admin') { showScreen('screen-notes'); return; }
+  if (currentScreenId === 'screen-chat' || currentScreenId === 'screen-chat-lock') { stopChat(); showScreen('screen-notes'); return; }
+  // 3. Folder / section back, one level (state-based).
+  if (currentScreenId === 'screen-notes' || currentScreenId === 'screen-practice') {
+    var browser = (currentScreenId === 'screen-notes') ? notesBrowser : practiceBrowser;
+    if (browser && browser.goBackOneLevel && browser.goBackOneLevel()) { return; }
+  }
+  // 4. Main tab at the top level with nothing open: exit the app.
+  exitApp();
+}
+
+function exitTakeScreen() {
+  stopTakeTimer();
+  takeState = null;
+  showScreen('screen-tests');
+}
+
+function exitApp() {
+  var AppPlugin = capPlugin('App');
+  if (AppPlugin && AppPlugin.exitApp) { AppPlugin.exitApp(); }
+  // Without the plugin (web preview) there is no system back button, so
+  // doing nothing here is correct.
+}
+
+/* Wire the Capacitor App plugin (@capacitor/app is already installed and
+ * synced — see android/app/src/main/assets/capacitor.plugins.json).
+ * Registering a backButton listener suppresses the default exit, so this
+ * handler IS the back behaviour. */
+(function setupSystemBackButton() {
+  var AppPlugin = capPlugin('App');
+  if (!AppPlugin || !AppPlugin.addListener) { return; }
+  AppPlugin.addListener('backButton', function () { goBackOneStep(); });
+  AppPlugin.addListener('appStateChange', function (state) {
+    if (state && state.isActive && authed) {
+      refreshCurrentScreen(true).catch(function () { /* silent */ });
+    }
+  });
+})();
 
 /* ================= Password gate ================= */
 var GATE_MSGS = {
@@ -219,6 +370,7 @@ function enterApp() {
   $('adminBtn').hidden = (window.MsStudySession.role !== 'admin');
   showScreen('screen-notes');
   startRevalidation();
+  startLivePoll();
   checkForUpdate();
 }
 
@@ -227,6 +379,7 @@ function lockout(reason) {
   window.MsStudySession.password = '';
   window.MsStudySession.role = '';
   stopRevalidation();
+  stopLivePoll();
   stopChat();
   $('activeChip').hidden = true;
   $('adminBtn').hidden = true;
@@ -431,8 +584,8 @@ function createBrowser(opts) {
     return html + '</div>';
   }
 
-  async function loadSectionItems(sectionId, box) {
-    box.innerHTML = '<p class="muted">Loading…</p>';
+  async function loadSectionItems(sectionId, box, silent) {
+    if (!silent) { box.innerHTML = '<p class="muted">Loading…</p>'; }
     box.hidden = false;
     try {
       var data = await apiCall('/items/list', { folderId: state.folderId, sectionId: sectionId });
@@ -441,13 +594,17 @@ function createBrowser(opts) {
       var html = '';
       if (items.length === 0) { html = '<p class="muted">Empty.</p>'; }
       items.forEach(function (it) {
-        html += '<button type="button" class="row-item" data-link="' + esc(it.drive_link || '') + '">' +
+        // FIX 7 (v1.0.12): items open in the in-app viewer — never Drive.
+        html += '<button type="button" class="row-item" data-item="1" data-item-id="' + esc(it.id || '') + '" data-item-kind="' + esc(it.kind || '') + '" data-item-title="' + esc(it.title || '') + '" data-item-file="' + esc(it.drive_file_id || '') + '">' +
           esc(it.title || '') + '</button>';
       });
       html += uploadCardsHtml(sectionId);
       box.innerHTML = html;
     } catch (e) {
-      box.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
+      if (!silent) {
+        box.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
+      }
+      if (silent) { throw e; }
     }
   }
 
@@ -532,12 +689,27 @@ function createBrowser(opts) {
     load();
   }
 
-  async function load() {
+  async function load(silent) {
     var list = $(opts.list);
     if (!list) { return; }
-    renderCrumb();
-    renderCreate();
-    list.innerHTML = '<p class="muted">Loading…</p>';
+    // FIX 10 (v1.0.12): a silent refresh (background poll) never shows a
+    // spinner, never wipes the list on a transient failure, never resets
+    // the scroll, and keeps open sections open (refreshing their items).
+    var openSections = [];
+    var scrollY = 0;
+    if (silent) {
+      scrollY = window.scrollY || 0;
+      list.querySelectorAll('.section-items').forEach(function (box) {
+        if (!box.hidden) {
+          var m = box.id.match(/-sec-(.+)$/);
+          if (m) { openSections.push(m[1]); }
+        }
+      });
+    } else {
+      renderCrumb();
+      renderCreate();
+      list.innerHTML = '<p class="muted">Loading…</p>';
+    }
     try {
       var fdata = await apiCall('/folders/list', { parentId: state.folderId, scope: opts.scope });
       var folders = (fdata && fdata.folders) || [];
@@ -562,18 +734,42 @@ function createBrowser(opts) {
           (isAdmin ? '<button type="button" class="row-del" data-del-folder="' + esc(f.id) + '" aria-label="Delete folder">×</button>' : '') + '</div>';
       });
       sections.forEach(function (s) {
-        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-section="' + esc(s.id) + '">▸ ' + esc(s.name) + '</button>' +
+        // FIX 8 (v1.0.12): a section with EXACTLY ONE item opens that item
+        // directly on tap — no item row, no expand. 0 or 2+ items keep the
+        // normal expand behaviour. The hidden section-items div stays so
+        // upload/delete still have their box.
+        var single = (s.item_count === 1 && s.single_item) ? s.single_item : null;
+        var openAttrs = '';
+        if (single) {
+          openAttrs = ' data-open-item="1" data-item-kind="' + esc(single.kind || '') + '" data-item-title="' + esc(single.title || '') + '" data-item-file="' + esc(single.drive_file_id || '') + '"';
+        }
+        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-section="' + esc(s.id) + '"' + openAttrs + '>▸ ' + esc(s.name) + '</button>' +
           (isAdmin ? '<button type="button" class="row-del" data-del-section="' + esc(s.id) + '" aria-label="Delete section">×</button>' : '') + '</div>';
         html += '<div class="section-items" id="' + opts.list + '-sec-' + esc(s.id) + '" hidden></div>';
       });
       items.forEach(function (it) {
-        html += '<button type="button" class="row-item" data-link="' + esc(it.drive_link || '') + '">' +
+        // FIX 7 (v1.0.12): items open in the in-app viewer — never Drive.
+        html += '<button type="button" class="row-item" data-item="1" data-item-id="' + esc(it.id || '') + '" data-item-kind="' + esc(it.kind || '') + '" data-item-title="' + esc(it.title || '') + '" data-item-file="' + esc(it.drive_file_id || '') + '">' +
           esc(it.title || '') + '</button>';
       });
       if (!html) { html = '<p class="muted">Empty.</p>'; }
       list.innerHTML = html;
+      if (silent) {
+        // Re-open the sections that were open before the refresh, and
+        // refresh their items in place.
+        openSections.forEach(function (sid) {
+          var box = $(opts.list + '-sec-' + sid);
+          if (box) { loadSectionItems(sid, box, true); }
+        });
+        if (scrollY) { window.scrollTo(0, scrollY); }
+      }
     } catch (e) {
-      list.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
+      if (!silent) {
+        list.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
+      }
+      // Silent: keep the old content; the next poll retries. Re-throw so
+      // the poll can back off.
+      if (silent) { throw e; }
     }
   }
 
@@ -611,6 +807,13 @@ function createBrowser(opts) {
          * card and wiped the picked file — so no upload could ever
          * complete ("Choose a file." every time). */
         if (ev.target.closest('.upload-card')) { return; }
+        // FIX 8 (v1.0.12): a single-item section opens its item directly —
+        // checked BEFORE the normal section toggle, so it never expands.
+        var oi = ev.target.closest('[data-open-item]');
+        if (oi) {
+          openViewer({ id: '', kind: oi.getAttribute('data-item-kind') || '', title: oi.getAttribute('data-item-title') || '', fileId: oi.getAttribute('data-item-file') || '' });
+          return;
+        }
         var f = ev.target.closest('[data-folder]');
         if (f) { openFolder(f.getAttribute('data-folder'), state.foldersById[f.getAttribute('data-folder')] || ''); return; }
         var s = ev.target.closest('[data-section]');
@@ -619,29 +822,143 @@ function createBrowser(opts) {
           if (box) { toggleSection(s.getAttribute('data-section'), box); }
           return;
         }
-        var l = ev.target.closest('[data-link]');
+        // FIX 7 (v1.0.12): an item opens in the in-app viewer — never Drive.
+        var l = ev.target.closest('[data-item]');
         if (l) {
-          var link = l.getAttribute('data-link');
-          if (link) { window.open(link, '_blank'); }
+          openViewer({ id: l.getAttribute('data-item-id') || '', kind: l.getAttribute('data-item-kind') || '', title: l.getAttribute('data-item-title') || '', fileId: l.getAttribute('data-item-file') || '' });
+          return;
         }
       });
     }
   }
 
+  /* FIX 12 (v1.0.12): one step back inside this browser — collapse an
+   * open section first, otherwise go up one folder level. Returns false
+   * when already at the top level with nothing open. */
+  function goBackOneLevel() {
+    var list = $(opts.list);
+    var openBox = null;
+    if (list) {
+      list.querySelectorAll('.section-items').forEach(function (box) {
+        if (!box.hidden) { openBox = box; }
+      });
+    }
+    if (openBox) {
+      openBox.hidden = true;
+      return true;
+    }
+    if (state.folderId) {
+      var parentIdx = state.path.length - 2;
+      goCrumb(parentIdx < 0 ? '' : parentIdx);
+      return true;
+    }
+    return false;
+  }
+
   bind();
-  return { load: load };
+  return { load: load, goBackOneLevel: goBackOneLevel };
 }
+
+/* ================= In-app PDF viewer (FIX 7, v1.0.12) =================
+ * A note/sheet opens INSIDE the app — never a Drive redirect. PDFs render
+ * with PDF.js (bundled in vendor/pdfjs/); images show as a plain <img>.
+ * The file bytes come from the server's POST /drive/file proxy (a Drive
+ * link has no CORS headers, so PDF.js could not fetch it directly). If the
+ * file cannot be opened, a clean in-app error shows — never a redirect. */
+var viewerState = { doc: null, page: 1, total: 0, title: '', blobUrl: null };
+
+function viewerShowError() {
+  $('viewerCanvas').hidden = true;
+  $('viewerImg').hidden = true;
+  $('viewerNav').hidden = true;
+  $('viewerError').hidden = false;
+}
+
+async function renderViewerPage() {
+  var doc = viewerState.doc;
+  if (!doc) { return; }
+  try {
+    var page = await doc.getPage(viewerState.page);
+    var viewport = page.getViewport({ scale: 1.5 });
+    var canvas = $('viewerCanvas');
+    var ctx = canvas.getContext('2d');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+    $('viewerPageLabel').textContent = 'Page ' + viewerState.page + ' of ' + viewerState.total;
+    $('viewerPrevBtn').disabled = (viewerState.page <= 1);
+    $('viewerNextBtn').disabled = (viewerState.page >= viewerState.total);
+  } catch (e) { viewerShowError(); }
+}
+
+async function openViewer(item) {
+  var fileId = (item && item.fileId) || '';
+  var title = (item && item.title) || 'File';
+  if (!fileId) { return; }
+  if (viewerState.doc) { try { viewerState.doc.destroy(); } catch (e) {} }
+  viewerState.doc = null; viewerState.page = 1; viewerState.total = 0; viewerState.title = title;
+  if (viewerState.blobUrl) { try { URL.revokeObjectURL(viewerState.blobUrl); } catch (e) {} viewerState.blobUrl = null; }
+  $('viewerTitle').textContent = title;
+  $('viewerCanvas').hidden = true;
+  $('viewerImg').hidden = true;
+  $('viewerNav').hidden = true;
+  $('viewerError').hidden = true;
+  $('screen-viewer').hidden = false;
+  pushBack({ kind: 'viewer', undo: closeViewer });
+  try {
+    var res = await fetch(SERVER_URL + '/drive/file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: window.MsStudySession.password, deviceId: window.MsStudySession.deviceId, fileId: fileId })
+    });
+    if (!res.ok) { viewerShowError(); return; }
+    var contentType = (res.headers.get('Content-Type') || '').toLowerCase();
+    var buf = await res.arrayBuffer();
+    if (contentType.indexOf('image/') === 0) {
+      var blob = new Blob([buf], { type: contentType.split(';')[0] });
+      viewerState.blobUrl = URL.createObjectURL(blob);
+      $('viewerImg').src = viewerState.blobUrl;
+      $('viewerImg').hidden = false;
+      return;
+    }
+    if (typeof window.pdfjsLib === 'undefined') { viewerShowError(); return; }
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js';
+    var doc = await window.pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+    viewerState.doc = doc;
+    viewerState.total = doc.numPages;
+    viewerState.page = 1;
+    $('viewerCanvas').hidden = false;
+    $('viewerNav').hidden = false;
+    await renderViewerPage();
+  } catch (e) {
+    viewerShowError();
+  }
+}
+
+function closeViewer() {
+  removeBackEntry('viewer');
+  if (viewerState.doc) { try { viewerState.doc.destroy(); } catch (e) {} }
+  viewerState.doc = null;
+  if (viewerState.blobUrl) { try { URL.revokeObjectURL(viewerState.blobUrl); } catch (e) {} viewerState.blobUrl = null; }
+  $('screen-viewer').hidden = true;
+}
+
+$('viewerCloseBtn').addEventListener('click', function () { goBackOneStep(); });
+$('viewerPrevBtn').addEventListener('click', function () {
+  if (viewerState.doc && viewerState.page > 1) { viewerState.page -= 1; renderViewerPage(); }
+});
+$('viewerNextBtn').addEventListener('click', function () {
+  if (viewerState.doc && viewerState.page < viewerState.total) { viewerState.page += 1; renderViewerPage(); }
+});
 
 /* Scope: a folder created on one screen only ever shows on that screen.
  * Notes='notes', Practice='practice', Tests='tests'. (Classes was removed.) */
 var notesBrowser = createBrowser({ crumb: 'notesCrumb', list: 'notesList', kind: 'note', create: 'notesCreate', scope: 'notes' });
 var practiceBrowser = createBrowser({ crumb: 'practiceCrumb', list: 'practiceList', kind: 'sheet', create: 'practiceCreate', scope: 'practice' });
-var testsBrowser = createBrowser({ crumb: 'testsCrumb', list: 'testsList', kind: null, create: 'testsCreate', scope: 'tests' });
 
 /* ================= Tests screen: AI test form + saved tests ================= */
 function refreshTestsScreen() {
-  $('aiTestForm').hidden = (window.MsStudySession.role !== 'admin');
-  testsBrowser.load();
+  $('aiTestForm').hidden = false; // AI test creation is open to every logged-in user (v1.0.12)
   refreshSavedTests();
 }
 
@@ -650,11 +967,13 @@ function refreshTestsScreen() {
 var savedAttempts = {};
 var lastAttemptChecked = {};
 
-async function refreshSavedTests() {
+async function refreshSavedTests(silent) {
   var list = $('savedTestsList');
   if (!list) { return; }
-  list.innerHTML = '<p class="muted">Loading…</p>';
-  $('testDetail').textContent = '';
+  if (!silent) {
+    list.innerHTML = '<p class="muted">Loading…</p>';
+    $('testDetail').textContent = '';
+  }
   try {
     var data = await apiCall('/tests/list', {});
     var tests = (data && data.tests) || [];
@@ -674,6 +993,9 @@ async function refreshSavedTests() {
     // Per test, ask the server for THIS user's latest attempt (never anyone
     // else's — the server filters by the caller's deviceId). Cards with a
     // previous attempt get a badge and offer Re-attempt / View Results.
+    // FIX 10: a silent poll skips these per-test calls (the badges are
+    // already shown from the initial load) to keep the poll cheap.
+    if (silent) { return; }
     savedAttempts = {};
     tests.forEach(function (t) {
       apiCall('/tests/last-attempt', { testId: t.id }).then(function (d) {
@@ -692,7 +1014,10 @@ async function refreshSavedTests() {
       }).catch(function () { lastAttemptChecked[t.id] = true; /* no attempt (or offline) — card stays a plain Start */ });
     });
   } catch (e) {
-    list.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
+    if (!silent) {
+      list.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
+    }
+    if (silent) { throw e; }
   }
 }
 
@@ -701,6 +1026,7 @@ async function refreshSavedTests() {
 var testChoice = null;
 
 function closeTestChoice() {
+  removeBackEntry('choice');
   $('testChoiceDialog').hidden = true;
   testChoice = null;
 }
@@ -710,6 +1036,7 @@ function showTestChoice(testId, attempt, title) {
   $('testChoiceTitle').textContent = testChoice.title;
   $('testChoiceMeta').textContent = 'You have attempted this test before.';
   $('testChoiceDialog').hidden = false;
+  pushBack({ kind: 'choice', undo: closeTestChoice });
 }
 
 $('savedTestsList').addEventListener('click', function (ev) {
@@ -879,6 +1206,7 @@ async function openTest(testId) {
     if (prevStatus) { prevStatus.textContent = ''; }
     $('testDetail').textContent = '';
     showScreen('screen-take');
+    pushBack({ kind: 'take', undo: exitTakeScreen });
     takeRenderTimer();
     takeRenderQuestion();
     takeState.timer = setInterval(function () {
@@ -1076,6 +1404,7 @@ async function viewSavedResult(testId, attempt) {
     $('takeBody').hidden = true;
     $('takeResult').hidden = false;
     showScreen('screen-take');
+    pushBack({ kind: 'take', undo: exitTakeScreen });
   } catch (e) {
     $('testDetail').textContent = e.message || 'Try again.';
   }
@@ -1133,9 +1462,11 @@ function openTakePalette() {
   if (!takeState || takeState.submitted) { return; }
   takeRenderPalette();
   $('takePalette').hidden = false;
+  pushBack({ kind: 'palette', undo: closeTakePalette });
 }
 
 function closeTakePalette() {
+  removeBackEntry('palette');
   $('takePalette').hidden = true;
 }
 
@@ -1152,16 +1483,8 @@ $('takePaletteGrid').addEventListener('click', function (ev) {
   closeTakePalette();
 });
 
-$('takeBackBtn').addEventListener('click', function () {
-  stopTakeTimer();
-  takeState = null;
-  showScreen('screen-tests');
-});
-
-$('takeDoneBtn').addEventListener('click', function () {
-  takeState = null;
-  showScreen('screen-tests');
-});
+$('takeBackBtn').addEventListener('click', function () { goBackOneStep(); });
+$('takeDoneBtn').addEventListener('click', function () { goBackOneStep(); });
 
 /* ================= Admin ================= */
 function adminHeaders() {
@@ -1197,19 +1520,24 @@ async function adminPost(path, extra) {
 $('adminBtn').addEventListener('click', function () {
   if (window.MsStudySession.role !== 'admin') { return; }
   showScreen('screen-admin');
+  pushBack({ kind: 'admin', undo: function () { showScreen('screen-notes'); } });
 });
-$('adminBackBtn').addEventListener('click', function () { showScreen('screen-notes'); });
+$('adminBackBtn').addEventListener('click', function () { goBackOneStep(); });
 
 $('adminCreateBtn').addEventListener('click', async function () {
   var btn = $('adminCreateBtn');
   btn.disabled = true;
   try {
-    var data = await adminPost('/admin/create-password', {});
+    // FIX 9 (v1.0.12): a typed custom password is sent as-is; empty = random.
+    var custom = ($('adminCustomPw').value || '').trim();
+    var data = await adminPost('/admin/create-password', custom ? { password: custom } : {});
     var code = data.code || data.password || '';
     if (!code) { throw new Error('Try again.'); }
     $('adminNewCodeText').textContent = code;
     $('adminCreateResult').hidden = false;
+    $('adminCustomPw').value = '';
     showToast('Password created.');
+    refreshAdminPasswords(); // FIX 9: the new row appears at once.
   } catch (e) {
     showToast('Could not create password.');
   } finally {
@@ -1224,9 +1552,11 @@ $('adminCopyBtn').addEventListener('click', async function () {
   } catch (e) { showToast('Could not copy.'); }
 });
 
-$('adminRefreshBtn').addEventListener('click', async function () {
+/* FIX 9 (v1.0.12): the password-list refresh, shared by the Refresh
+ * button and by the auto-refresh after a create/delete/deactivate. */
+async function refreshAdminPasswords() {
   var btn = $('adminRefreshBtn');
-  btn.disabled = true;
+  if (btn) { btn.disabled = true; }
   try {
     var data = await adminPost('/admin/passwords', {});
     var rows = data.passwords || data.items || data || [];
@@ -1239,22 +1569,47 @@ $('adminRefreshBtn').addEventListener('click', async function () {
     rows.forEach(function (row) {
       var id = row.id || row.passwordId || '';
       var active = (row.active !== false);
-      html += '<tr><td>' + esc(row.role || 'user') + '</td><td>' + esc(row.deviceId || row.device || '—') +
-        '</td><td>' + esc(row.deviceLabel || row.label || '—') + '</td><td>' + esc(row.lastUsed || row.last_used || '—') +
+      // FIX 9: the server returns snake_case — read those fields first so
+      // Device / Label / Last used show real values instead of "—".
+      var device = row.device_id || row.deviceId || row.device || '—';
+      var label = row.device_label || row.deviceLabel || row.label || '—';
+      var lastUsed = row.last_used_at || row.lastUsed || row.last_used || '—';
+      html += '<tr><td>' + esc(row.role || 'user') + '</td><td>' + esc(device) +
+        '</td><td>' + esc(label) + '</td><td>' + esc(lastUsed) +
         '</td><td>' + (active ? '✅' : '❌') + '</td><td>' +
         (active ? '<button class="row-btn" type="button" data-deactivate="' + esc(id) + '">Deactivate</button>' : '') +
+        ' <button class="row-btn" type="button" data-delete-pw="' + esc(id) + '">Delete</button>' +
         '</td></tr>';
     });
     $('adminPasswordsBody').innerHTML = html;
   } catch (e) {
     showToast('Could not load the list.');
   } finally {
-    btn.disabled = false;
+    if (btn) { btn.disabled = false; }
   }
-});
+}
 
-/* Deactivate buttons are rendered in a batch, so one delegated listener. */
+$('adminRefreshBtn').addEventListener('click', refreshAdminPasswords);
+
+/* Deactivate + Delete buttons are rendered in a batch, so one delegated
+ * listener. FIX 9 (v1.0.12): Delete is a real delete — the user is signed
+ * out on their next revalidation. */
 $('adminPasswordsBody').addEventListener('click', async function (ev) {
+  var del = ev.target.closest('[data-delete-pw]');
+  if (del) {
+    var delId = del.getAttribute('data-delete-pw');
+    if (!window.confirm('Delete this password? The user will be signed out.')) { return; }
+    del.disabled = true;
+    try {
+      await adminPost('/admin/delete-password', { id: delId });
+      showToast('Password deleted.');
+      refreshAdminPasswords();
+    } catch (e) {
+      showToast('Could not delete.');
+      del.disabled = false;
+    }
+    return;
+  }
   var btn = ev.target.closest('[data-deactivate]');
   if (!btn) { return; }
   var id = btn.getAttribute('data-deactivate');
@@ -1262,7 +1617,7 @@ $('adminPasswordsBody').addEventListener('click', async function (ev) {
   try {
     await adminPost('/admin/deactivate', { id: id });
     showToast('Password deactivated.');
-    $('adminRefreshBtn').click();
+    refreshAdminPasswords();
   } catch (e) {
     showToast('Could not deactivate.');
     btn.disabled = false;
@@ -1385,6 +1740,7 @@ $('chatLockBtn').addEventListener('click', async function () {
       return;
     }
     showScreen('screen-chat');
+    pushBack({ kind: 'chat', undo: function () { stopChat(); showScreen('screen-notes'); } });
     startChat();
   } catch (e) {
     /* apiCall already locks out on an auth failure; anything else is
@@ -1412,6 +1768,8 @@ var chatState = {
   presence: [],
   pollTimer: null,
   pollBusy: false,
+  markReadBusy: false, // FIX 6 (v1.0.12): throttles /chat/mark-read to once per poll cycle
+  _otherReadAt: null,  // FIX 6 (v1.0.12): last seen other-member last_read_at (for tick re-render)
   sending: false,
   replyTo: null,
   menuMsgId: null
@@ -1552,7 +1910,7 @@ function startChat() {
 function formatChatTime(ts) {
   var d = new Date(ts);
   if (isNaN(d.getTime())) { return ''; }
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
 function formatLastSeen(ts) {
@@ -1560,10 +1918,10 @@ function formatLastSeen(ts) {
   if (isNaN(d.getTime())) { return 'Last seen recently'; }
   var now = new Date();
   if (d.toDateString() === now.toDateString()) {
-    return 'Last seen ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return 'Last seen ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
   }
   return 'Last seen ' + d.toLocaleDateString([], { day: 'numeric', month: 'short' }) +
-    ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
 function chatListAtBottom() {
@@ -1585,9 +1943,18 @@ function renderChatMessages(scroll) {
     if (m.reply_to && chatState.byId[m.reply_to]) {
       quote = '<div class="msg-quote">' + esc(chatState.byId[m.reply_to].body || '') + '</div>';
     }
+    // FIX 6 (v1.0.12): read receipt on MY messages only — double tick
+    // when the other member's last_read_at is at or after this message's
+    // time, otherwise a single tick. No ticks on their messages.
+    var tick = '';
+    if (mine) {
+      var otherReadAt = chatOtherLastReadAt();
+      var seen = otherReadAt && (new Date(otherReadAt).getTime() >= new Date(m.created_at).getTime());
+      tick = '<span class="msg-tick' + (seen ? ' seen' : '') + '">' + (seen ? '✓✓' : '✓') + '</span>';
+    }
     html += '<div class="msg ' + (mine ? 'msg-mine' : 'msg-theirs') + '" data-msg="' + esc(m.id) + '">' +
       quote + '<div class="msg-body">' + esc(m.body || '') + '</div>' +
-      '<span class="msg-time">' + esc(formatChatTime(m.created_at)) + '</span></div>';
+      '<span class="msg-time">' + esc(formatChatTime(m.created_at)) + tick + '</span></div>';
   });
   list.innerHTML = html;
   if (scroll === 'always' || atBottom) { list.scrollTop = list.scrollHeight; }
@@ -1615,6 +1982,34 @@ function renderChatPresence() {
   } else {
     dot.classList.remove('on');
     text.textContent = (p && p.lastSeen) ? formatLastSeen(p.lastSeen) : 'Offline';
+  }
+}
+
+/* FIX 6 (v1.0.12): the OTHER member's last_read_at, from the presence
+ * the server already returns with /chat/messages. */
+function chatOtherLastReadAt() {
+  var other = null;
+  (chatState.members || []).forEach(function (m) {
+    if (m !== chatState.myDeviceId) { other = m; }
+  });
+  if (!other) { return null; }
+  var found = null;
+  (chatState.presence || []).forEach(function (x) {
+    if (x.deviceId === other) { found = x; }
+  });
+  return (found && found.lastReadAt) || null;
+}
+
+/* FIX 6 (v1.0.12): tell the server I have read the chat, so the other side
+ * sees double ticks. Throttled to once per poll cycle; a failure is silent
+ * and must never break the chat. */
+async function markChatRead() {
+  if (!chatState.code || chatState.markReadBusy) { return; }
+  chatState.markReadBusy = true;
+  try {
+    await apiCall('/chat/mark-read', { code: chatState.code });
+  } catch (e) { /* silent */ } finally {
+    chatState.markReadBusy = false;
   }
 }
 
@@ -1651,6 +2046,22 @@ async function loadChatMessages(initial) {
         renderChatMessages(initial ? 'always' : true);
       }
       renderChatPresence();
+      // FIX 6 (v1.0.12): re-render the ticks when the other member's read
+      // time changes, even if no new message arrived (renderChatMessages
+      // only runs on new messages above, so ticks would otherwise stay
+      // single until the next message).
+      var curRead = chatOtherLastReadAt();
+      if (curRead !== chatState._otherReadAt) {
+        chatState._otherReadAt = curRead;
+        renderChatMessages();
+      }
+      // FIX 6 (v1.0.12): mark the chat as read when the other person has
+      // sent messages — once per poll cycle, silent on failure.
+      var hasOtherMsg = false;
+      (chatState.messages || []).forEach(function (m) {
+        if (m.sender_device !== chatState.myDeviceId) { hasOtherMsg = true; }
+      });
+      if (hasOtherMsg) { markChatRead(); }
     }
   } catch (e) {
     /* Transient poll failure — keep polling. apiCall already locks
@@ -1740,9 +2151,11 @@ async function deleteChatMessage(msgId) {
 function openChatMsgMenu(msgId) {
   chatState.menuMsgId = msgId;
   $('chatMsgMenu').hidden = false;
+  pushBack({ kind: 'menu', undo: closeChatMsgMenu });
 }
 
 function closeChatMsgMenu() {
+  removeBackEntry('menu');
   chatState.menuMsgId = null;
   $('chatMsgMenu').hidden = true;
 }
@@ -1753,10 +2166,7 @@ $('chatInput').addEventListener('keydown', function (ev) {
   if (ev.key === 'Enter') { sendChatMessage(); }
 });
 $('chatReplyCancel').addEventListener('click', hideReplyBar);
-$('chatBackBtn').addEventListener('click', function () {
-  stopChat();
-  showScreen('screen-notes');
-});
+$('chatBackBtn').addEventListener('click', function () { goBackOneStep(); });
 
 /* Long-press a message: Reply / Delete menu (touch + mouse). */
 var chatLpTimer = null;
