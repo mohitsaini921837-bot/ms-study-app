@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 13;
+var CURRENT_VERSION_CODE = 14;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -692,6 +692,27 @@ function createBrowser(opts) {
   async function load(silent) {
     var list = $(opts.list);
     if (!list) { return; }
+    // v1.0.13 FIX (PDF upload bug, user video 2026-11-24 22:54 IST):
+    // the 0.5s silent poll rebuilt the whole list AND every open
+    // section (including its upload card) every 500ms — so a picked
+    // PDF file was wiped within half a second, before she could tap
+    // Upload ("Choose a file." every time, upload never happened).
+    // A silent refresh must NEVER run while an upload is in progress:
+    // if any open section's upload card has a file picked, or the user
+    // is typing in it, skip this refresh entirely — the next poll
+    // (500ms later) will pick up new items once the upload is done.
+    if (silent) {
+      var uploadBusy = false;
+      list.querySelectorAll('.section-items').forEach(function (box) {
+        if (box.hidden) { return; }
+        var fis = box.querySelectorAll('.file-input');
+        for (var i = 0; i < fis.length; i++) {
+          if (fis[i].files && fis[i].files.length) { uploadBusy = true; }
+        }
+        if (box.contains(document.activeElement) && document.activeElement && document.activeElement.tagName === 'INPUT') { uploadBusy = true; }
+      });
+      if (uploadBusy) { return; }
+    }
     // FIX 10 (v1.0.12): a silent refresh (background poll) never shows a
     // spinner, never wipes the list on a transient failure, never resets
     // the scroll, and keeps open sections open (refreshing their items).
@@ -1770,6 +1791,8 @@ var chatState = {
   pollBusy: false,
   markReadBusy: false, // FIX 6 (v1.0.12): throttles /chat/mark-read to once per poll cycle
   _otherReadAt: null,  // FIX 6 (v1.0.12): last seen other-member last_read_at (for tick re-render)
+  renderedMsgIds: {},  // v1.0.13: ids already rendered (so a re-render does not re-animate them)
+  renderedOnce: false, // v1.0.13: true after the first render of this chat open
   sending: false,
   replyTo: null,
   menuMsgId: null
@@ -1888,6 +1911,8 @@ function stopChat() {
   chatState.menuMsgId = null;
   chatState.sending = false;
   chatState.pollBusy = false;
+  chatState.renderedMsgIds = {};
+  chatState.renderedOnce = false;
 }
 
 function startChat() {
@@ -1905,6 +1930,36 @@ function startChat() {
   loadChatMessages(true);
   stopChatPolling();
   chatState.pollTimer = setInterval(function () { loadChatMessages(false); }, 2000);
+  // v1.0.13 FIX (notification bug, user video 2026-11-24 22:54 IST):
+  // the app never asked for notification permission, so no alert could
+  // ever arrive. The boot-time request evidently never showed (silent
+  // failure). Ask again now, while the user is looking at the chat —
+  // and show the permission state under the chat, tappable to enable.
+  ensurePushRegistered();
+  updateChatNotifStatus();
+}
+
+/* v1.0.13: show the notification permission state under the chat so
+ * the user can SEE it (and tap to enable). 'prompt' = not asked yet,
+ * 'granted' = on, 'denied' = blocked — enable it in Settings. */
+async function updateChatNotifStatus() {
+  var el = $('chatNotifStatus');
+  if (!el) { return; }
+  var plugin = pushPlugin();
+  if (!plugin) { el.textContent = 'Notifications: unavailable on this device.'; return; }
+  var state = 'prompt';
+  try {
+    var perm = await plugin.checkPermissions();
+    if (perm && perm.receive) { state = perm.receive; }
+  } catch (e) { /* fall through: treat as prompt */ }
+  if (state === 'granted') {
+    el.textContent = 'Notifications: on.';
+  } else if (state === 'denied') {
+    el.textContent = 'Notifications: off — allow them in Settings to get message alerts.';
+  } else {
+    el.textContent = 'Notifications: off — tap here to turn on message alerts.';
+  }
+  el.setAttribute('data-notif-state', state);
 }
 
 function formatChatTime(ts) {
@@ -1937,8 +1992,18 @@ function renderChatMessages(scroll) {
     return;
   }
   var html = '';
+  // v1.0.13 FIX (pop-up bug, user video 2026-11-24 22:54 IST): the list
+  // is fully rebuilt (innerHTML) on every poll, and the CSS animated
+  // the LAST message every time — so the latest bubble kept popping
+  // up again and again. Now only a message that is genuinely NEW in
+  // this render gets the entry animation (class msg-new); a message
+  // that was already rendered never animates again. The first render
+  // of a chat open animates nothing (opening the chat must not pop
+  // every old message).
+  var firstRender = !chatState.renderedOnce;
   chatState.messages.forEach(function (m) {
     var mine = (m.sender_device === chatState.myDeviceId);
+    var isNew = !firstRender && !chatState.renderedMsgIds[m.id];
     var quote = '';
     if (m.reply_to && chatState.byId[m.reply_to]) {
       quote = '<div class="msg-quote">' + esc(chatState.byId[m.reply_to].body || '') + '</div>';
@@ -1952,11 +2017,16 @@ function renderChatMessages(scroll) {
       var seen = otherReadAt && (new Date(otherReadAt).getTime() >= new Date(m.created_at).getTime());
       tick = '<span class="msg-tick' + (seen ? ' seen' : '') + '">' + (seen ? '✓✓' : '✓') + '</span>';
     }
-    html += '<div class="msg ' + (mine ? 'msg-mine' : 'msg-theirs') + '" data-msg="' + esc(m.id) + '">' +
+    html += '<div class="msg ' + (mine ? 'msg-mine' : 'msg-theirs') + (isNew ? ' msg-new' : '') + '" data-msg="' + esc(m.id) + '">' +
       quote + '<div class="msg-body">' + esc(m.body || '') + '</div>' +
       '<span class="msg-time">' + esc(formatChatTime(m.created_at)) + tick + '</span></div>';
   });
   list.innerHTML = html;
+  // Remember what was just rendered, so the next re-render (poll tick
+  // or read-receipt change) does not re-animate anything.
+  chatState.renderedMsgIds = {};
+  chatState.messages.forEach(function (m) { chatState.renderedMsgIds[m.id] = true; });
+  chatState.renderedOnce = true;
   if (scroll === 'always' || atBottom) { list.scrollTop = list.scrollHeight; }
 }
 
@@ -2057,11 +2127,18 @@ async function loadChatMessages(initial) {
       }
       // FIX 6 (v1.0.12): mark the chat as read when the other person has
       // sent messages — once per poll cycle, silent on failure.
+      // v1.0.13 FIX (auto-seen bug, user video 2026-11-24 22:54 IST): the
+      // 2s poll kept running while the app sat in the background (in
+      // recents), so it marked messages READ even though the user had
+      // never looked at them — the other side saw ✓✓ for a message
+      // nobody read. Only mark read when the user is ACTUALLY looking:
+      // the app must be in the foreground AND the chat screen must be
+      // the active screen.
       var hasOtherMsg = false;
       (chatState.messages || []).forEach(function (m) {
         if (m.sender_device !== chatState.myDeviceId) { hasOtherMsg = true; }
       });
-      if (hasOtherMsg) { markChatRead(); }
+      if (hasOtherMsg && document.visibilityState === 'visible' && currentScreenId === 'screen-chat') { markChatRead(); }
     }
   } catch (e) {
     /* Transient poll failure — keep polling. apiCall already locks
@@ -2100,6 +2177,11 @@ async function sendChatMessage() {
       $('chatInput').value = '';
       hideReplyBar();
       renderChatMessages('always');
+      // v1.0.13 FIX (keyboard bug, user video 2026-11-24 22:54 IST):
+      // tapping Send moved focus to the button and the keyboard closed,
+      // so she had to tap the input again for every message. Keep the
+      // keyboard open — refocus the input after sending.
+      $('chatInput').focus();
     } else {
       $('chatStatus').textContent = 'Try again.';
     }
@@ -2162,6 +2244,11 @@ function closeChatMsgMenu() {
 
 /* Composer */
 $('chatSendBtn').addEventListener('click', sendChatMessage);
+// v1.0.13: tap the notification status line to enable notifications.
+$('chatNotifStatus').addEventListener('click', async function () {
+  await ensurePushRegistered();
+  updateChatNotifStatus();
+});
 $('chatInput').addEventListener('keydown', function (ev) {
   if (ev.key === 'Enter') { sendChatMessage(); }
 });

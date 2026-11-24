@@ -612,9 +612,9 @@ p { margin: 0 0 12px; line-height: 1.55; }
 /* Morph in on arrival: chat only re-renders when a new message arrives
    (app.js polls every 2s but skips render with no new message), so only
    the newest bubble plays this. */
-.chat-list .msg:last-child { animation: msg-in 420ms var(--spring); }
-.msg-mine:last-child { transform-origin: bottom right; }
-.msg-theirs:last-child { transform-origin: bottom left; }
+.chat-list .msg.msg-new { animation: msg-in 420ms var(--spring); }
+.msg-mine.msg-new { transform-origin: bottom right; }
+.msg-theirs.msg-new { transform-origin: bottom left; }
 .msg-quote {
   font-size: 12.5px;
   opacity: 0.75;

@@ -1,6 +1,6 @@
 {
-  "apkUrl": "https://mohitsaini921837-bot.github.io/ms-study-app/update/MS-Study-v1.0.12.apk",
-  "changelog": "12-hour chat time, AI tests for everyone, per-user tests, AI subject lock, smoother aurora, chat read ticks, in-app PDF viewer, tap a section to open its PDF, custom passwords + delete, live updates every 0.5s, no folders on Tests, Android back button works step by step, test generation fixed (new Gemini models + retry).",
-  "version": "1.0.12",
-  "versionCode": 13
+  "apkUrl": "https://mohitsaini921837-bot.github.io/ms-study-app/update/MS-Study-v1.0.13.apk",
+  "changelog": "Chat seen ticks only when you actually open the chat (no more auto-seen from background), latest message no longer pops up again and again, keyboard stays open after sending a message, PDF upload no longer wiped by live refresh, notification permission now asks when you open the chat with a visible on/off status.",
+  "version": "1.0.13",
+  "versionCode": 14
 }
