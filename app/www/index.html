@@ -59,6 +59,7 @@
   <section class="screen" id="screen-notes" hidden>
     <div class="section-head"><h2>Notes</h2></div>
     <div class="crumb" id="notesCrumb"></div>
+    <div class="browser-create" id="notesCreate" hidden></div>
     <div id="notesList"></div>
   </section>
 
@@ -105,6 +106,7 @@
     <div class="card">
       <h3>Folders</h3>
       <div class="crumb" id="testsCrumb"></div>
+      <div class="browser-create" id="testsCreate" hidden></div>
       <div id="testsList"></div>
     </div>
   </section>
@@ -113,6 +115,7 @@
   <section class="screen" id="screen-practice" hidden>
     <div class="section-head"><h2>Practice</h2></div>
     <div class="crumb" id="practiceCrumb"></div>
+    <div class="browser-create" id="practiceCreate" hidden></div>
     <div id="practiceList"></div>
   </section>
 
@@ -120,6 +123,7 @@
   <section class="screen" id="screen-classes" hidden>
     <div class="section-head"><h2>Classes</h2></div>
     <div class="crumb" id="classesCrumb"></div>
+    <div class="browser-create" id="classesCreate" hidden></div>
     <div id="classesList"></div>
   </section>
 
@@ -151,63 +155,6 @@
           </tbody>
         </table>
       </div>
-    </div>
-
-    <div class="card">
-      <h3>Folders</h3>
-      <div class="crumb" id="adminCrumb"></div>
-      <div id="adminFolderList"></div>
-      <div class="row-form">
-        <input class="field-input" id="adminNewFolderName" type="text" placeholder="Folder name" autocomplete="off" />
-        <button class="btn-secondary" id="adminNewFolderBtn" type="button">Add folder</button>
-      </div>
-      <p class="muted small" id="adminFolderStatus"></p>
-    </div>
-
-    <div class="card">
-      <h3>Sections</h3>
-      <div id="adminSectionList"></div>
-      <div class="row-form">
-        <input class="field-input" id="adminNewSectionName" type="text" placeholder="Section name" autocomplete="off" />
-        <button class="btn-secondary" id="adminNewSectionBtn" type="button">Add section</button>
-      </div>
-      <p class="muted small" id="adminSectionStatus"></p>
-    </div>
-
-    <div class="card">
-      <h3>Upload note</h3>
-      <label class="field-label" for="upNoteTitle">Title</label>
-      <input class="field-input" id="upNoteTitle" type="text" placeholder="Title" autocomplete="off" />
-      <label class="field-label" for="upNoteSection">Section</label>
-      <select class="field-input" id="upNoteSection"><option value="">No section</option></select>
-      <label class="field-label" for="upNoteFile">File</label>
-      <input class="field-input file-input" id="upNoteFile" type="file" />
-      <button class="btn-primary" id="upNoteBtn" type="button">Upload</button>
-      <p class="muted small" id="upNoteStatus"></p>
-    </div>
-
-    <div class="card">
-      <h3>Upload practice sheet</h3>
-      <label class="field-label" for="upSheetTitle">Title</label>
-      <input class="field-input" id="upSheetTitle" type="text" placeholder="Title" autocomplete="off" />
-      <label class="field-label" for="upSheetSection">Section</label>
-      <select class="field-input" id="upSheetSection"><option value="">No section</option></select>
-      <label class="field-label" for="upSheetFile">File</label>
-      <input class="field-input file-input" id="upSheetFile" type="file" />
-      <button class="btn-primary" id="upSheetBtn" type="button">Upload</button>
-      <p class="muted small" id="upSheetStatus"></p>
-    </div>
-
-    <div class="card">
-      <h3>Upload class video</h3>
-      <label class="field-label" for="upVideoTitle">Title</label>
-      <input class="field-input" id="upVideoTitle" type="text" placeholder="Title" autocomplete="off" />
-      <label class="field-label" for="upVideoSection">Section</label>
-      <select class="field-input" id="upVideoSection"><option value="">No section</option></select>
-      <label class="field-label" for="upVideoFile">File</label>
-      <input class="field-input file-input" id="upVideoFile" type="file" />
-      <button class="btn-primary" id="upVideoBtn" type="button">Upload</button>
-      <p class="muted small" id="upVideoStatus"></p>
     </div>
   </section>
 

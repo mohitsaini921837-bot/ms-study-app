@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 5;
+var CURRENT_VERSION_CODE = 6;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -121,7 +121,6 @@ function showScreen(id) {
   else if (id === 'screen-practice') { practiceBrowser.load(); }
   else if (id === 'screen-classes') { classesBrowser.load(); }
   else if (id === 'screen-tests') { refreshTestsScreen(); }
-  else if (id === 'screen-admin') { loadAdminFolder(); }
 }
 
 document.querySelectorAll('.nav-btn').forEach(function (btn) {
@@ -319,7 +318,10 @@ async function apiCall(path, extra) {
 /* ================= Folder browser (Notes / Tests / Practice / Classes) ================= */
 /* Each browser keeps its own folder + path. Folders open on tap
  * (breadcrumb to go back), sections expand to show their items,
- * items open their Drive link on tap. */
+ * items open their Drive link on tap.
+ * Admin only, inside a folder: "New folder" / "New section" create row.
+ * Admin only, inside an open section: Note / Practice sheet / Class
+ * video upload cards — all three kinds, on every browser screen. */
 function createBrowser(opts) {
   var state = { folderId: null, path: [], foldersById: {}, expanded: {} };
 
@@ -331,6 +333,146 @@ function createBrowser(opts) {
       html += '<span class="crumb-sep">/</span><button type="button" class="crumb-btn" data-crumb="' + i + '">' + esc(p.name) + '</button>';
     });
     c.innerHTML = html;
+  }
+
+  /* Admin-only create row, inside the CURRENT folder ("All" = top level).
+   * New folder works at any level; New section needs a folder open. */
+  function renderCreate() {
+    var box = $(opts.create);
+    if (!box) { return; }
+    if (window.MsStudySession.role !== 'admin') { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    var html = '<div class="row-form"><input class="field-input" data-new-folder type="text" placeholder="Folder name" autocomplete="off" />' +
+      '<button class="btn-secondary" data-add-folder type="button">Add folder</button></div>' +
+      '<p class="muted small" data-folder-status></p>';
+    if (state.folderId) {
+      html += '<div class="row-form"><input class="field-input" data-new-section type="text" placeholder="Section name" autocomplete="off" />' +
+        '<button class="btn-secondary" data-add-section type="button">Add section</button></div>' +
+        '<p class="muted small" data-section-status></p>';
+    } else {
+      html += '<p class="muted small">Open a folder first.</p>';
+    }
+    box.innerHTML = html;
+  }
+
+  function setCreateStatus(kind, msg) {
+    var box = $(opts.create);
+    if (!box) { return; }
+    var el = box.querySelector('[data-' + kind + '-status]');
+    if (el) { el.textContent = msg; }
+  }
+
+  async function createFolder() {
+    var box = $(opts.create);
+    if (!box) { return; }
+    var input = box.querySelector('[data-new-folder]');
+    var name = (input && input.value ? input.value : '').trim();
+    if (!name) { setCreateStatus('folder', 'Enter a name.'); return; }
+    var btn = box.querySelector('[data-add-folder]');
+    if (btn) { btn.disabled = true; }
+    setCreateStatus('folder', 'Creating…');
+    try {
+      await apiCall('/folders/create', { name: name, parentId: state.folderId });
+      if (input) { input.value = ''; }
+      setCreateStatus('folder', 'Folder created.');
+      load();
+    } catch (e) {
+      setCreateStatus('folder', e.message || 'Try again.');
+    } finally {
+      if (btn) { btn.disabled = false; }
+    }
+  }
+
+  async function createSection() {
+    var box = $(opts.create);
+    if (!box) { return; }
+    if (!state.folderId) { setCreateStatus('section', 'Open a folder first.'); return; }
+    var input = box.querySelector('[data-new-section]');
+    var name = (input && input.value ? input.value : '').trim();
+    if (!name) { setCreateStatus('section', 'Enter a name.'); return; }
+    var btn = box.querySelector('[data-add-section]');
+    if (btn) { btn.disabled = true; }
+    setCreateStatus('section', 'Creating…');
+    try {
+      await apiCall('/sections/create', { name: name, folderId: state.folderId });
+      if (input) { input.value = ''; }
+      setCreateStatus('section', 'Section created.');
+      load();
+    } catch (e) {
+      setCreateStatus('section', e.message || 'Try again.');
+    } finally {
+      if (btn) { btn.disabled = false; }
+    }
+  }
+
+  /* Upload cards inside an open section — all three kinds, every screen,
+   * admin only. data-section carries the section id for the upload. */
+  function uploadCardsHtml(sectionId) {
+    if (window.MsStudySession.role !== 'admin') { return ''; }
+    var kinds = [['note', 'Note'], ['sheet', 'Practice sheet'], ['video', 'Class video']];
+    var html = '<div class="section-uploads">';
+    kinds.forEach(function (k) {
+      html += '<div class="upload-card" data-section="' + esc(sectionId) + '">' +
+        '<div class="upload-title">Upload ' + k[1] + '</div>' +
+        '<input class="field-input" data-up-title="' + k[0] + '" type="text" placeholder="Title" autocomplete="off" />' +
+        '<input class="field-input file-input" data-up-file="' + k[0] + '" type="file" />' +
+        '<button class="btn-primary" data-up-btn="' + k[0] + '" type="button">Upload</button>' +
+        '<p class="muted small" data-up-status="' + k[0] + '"></p>' +
+        '</div>';
+    });
+    return html + '</div>';
+  }
+
+  async function loadSectionItems(sectionId, box) {
+    box.innerHTML = '<p class="muted">Loading…</p>';
+    box.hidden = false;
+    try {
+      var data = await apiCall('/items/list', { folderId: state.folderId, sectionId: sectionId });
+      var items = (data && data.items) || [];
+      if (opts.kind) { items = items.filter(function (it) { return it.kind === opts.kind; }); }
+      var html = '';
+      if (items.length === 0) { html = '<p class="muted">Empty.</p>'; }
+      items.forEach(function (it) {
+        html += '<button type="button" class="row-item" data-link="' + esc(it.drive_link || '') + '">' +
+          esc(it.title || '') + '</button>';
+      });
+      html += uploadCardsHtml(sectionId);
+      box.innerHTML = html;
+    } catch (e) {
+      box.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
+    }
+  }
+
+  function toggleSection(sectionId, box) {
+    if (!box.hidden) { box.hidden = true; return; }
+    loadSectionItems(sectionId, box);
+  }
+
+  async function uploadIntoSection(btn) {
+    var kind = btn.getAttribute('data-up-btn');
+    var card = btn.closest('.upload-card');
+    if (!card || !kind) { return; }
+    var sectionId = card.getAttribute('data-section');
+    var titleInput = card.querySelector('[data-up-title="' + kind + '"]');
+    var fileInput = card.querySelector('[data-up-file="' + kind + '"]');
+    var status = card.querySelector('[data-up-status="' + kind + '"]');
+    var file = fileInput && fileInput.files && fileInput.files[0];
+    if (!file) { if (status) { status.textContent = 'Choose a file.'; } return; }
+    var title = (titleInput && titleInput.value ? titleInput.value : '').trim();
+    btn.disabled = true;
+    if (status) { status.textContent = 'Uploading…'; }
+    try {
+      await window.MsDrive.upload(file, title, kind, state.folderId, sectionId);
+      if (status) { status.textContent = 'Uploaded.'; }
+      if (fileInput) { fileInput.value = ''; }
+      if (titleInput) { titleInput.value = ''; }
+      var box = $(opts.list + '-sec-' + sectionId);
+      if (box) { loadSectionItems(sectionId, box); }
+    } catch (e) {
+      if (status) { status.textContent = e.message || 'Try again.'; }
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function openFolder(id, name) {
@@ -353,30 +495,11 @@ function createBrowser(opts) {
     load();
   }
 
-  async function toggleSection(sectionId, box) {
-    if (!box.hidden) { box.hidden = true; return; }
-    box.innerHTML = '<p class="muted">Loading…</p>';
-    box.hidden = false;
-    try {
-      var data = await apiCall('/items/list', { folderId: state.folderId, sectionId: sectionId });
-      var items = (data && data.items) || [];
-      if (opts.kind) { items = items.filter(function (it) { return it.kind === opts.kind; }); }
-      if (items.length === 0) { box.innerHTML = '<p class="muted">Empty.</p>'; return; }
-      var html = '';
-      items.forEach(function (it) {
-        html += '<button type="button" class="row-item" data-link="' + esc(it.drive_link || '') + '">' +
-          esc(it.title || '') + '</button>';
-      });
-      box.innerHTML = html;
-    } catch (e) {
-      box.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
-    }
-  }
-
   async function load() {
     var list = $(opts.list);
     if (!list) { return; }
     renderCrumb();
+    renderCreate();
     list.innerHTML = '<p class="muted">Loading…</p>';
     try {
       var fdata = await apiCall('/folders/list', { parentId: state.folderId });
@@ -416,9 +539,18 @@ function createBrowser(opts) {
         goCrumb(b.getAttribute('data-crumb'));
       });
     }
+    var createBox = $(opts.create);
+    if (createBox) {
+      createBox.addEventListener('click', function (ev) {
+        if (ev.target.closest('[data-add-folder]')) { createFolder(); return; }
+        if (ev.target.closest('[data-add-section]')) { createSection(); return; }
+      });
+    }
     var list = $(opts.list);
     if (list) {
       list.addEventListener('click', function (ev) {
+        var up = ev.target.closest('[data-up-btn]');
+        if (up) { uploadIntoSection(up); return; }
         var f = ev.target.closest('[data-folder]');
         if (f) { openFolder(f.getAttribute('data-folder'), state.foldersById[f.getAttribute('data-folder')] || ''); return; }
         var s = ev.target.closest('[data-section]');
@@ -440,10 +572,10 @@ function createBrowser(opts) {
   return { load: load };
 }
 
-var notesBrowser = createBrowser({ crumb: 'notesCrumb', list: 'notesList', kind: 'note' });
-var practiceBrowser = createBrowser({ crumb: 'practiceCrumb', list: 'practiceList', kind: 'sheet' });
-var classesBrowser = createBrowser({ crumb: 'classesCrumb', list: 'classesList', kind: 'video' });
-var testsBrowser = createBrowser({ crumb: 'testsCrumb', list: 'testsList', kind: null });
+var notesBrowser = createBrowser({ crumb: 'notesCrumb', list: 'notesList', kind: 'note', create: 'notesCreate' });
+var practiceBrowser = createBrowser({ crumb: 'practiceCrumb', list: 'practiceList', kind: 'sheet', create: 'practiceCreate' });
+var classesBrowser = createBrowser({ crumb: 'classesCrumb', list: 'classesList', kind: 'video', create: 'classesCreate' });
+var testsBrowser = createBrowser({ crumb: 'testsCrumb', list: 'testsList', kind: null, create: 'testsCreate' });
 
 /* ================= Tests screen: AI test form + saved tests ================= */
 function refreshTestsScreen() {
@@ -638,172 +770,6 @@ $('adminPasswordsBody').addEventListener('click', async function (ev) {
   }
 });
 
-/* ---------- Admin folders / sections / uploads ---------- */
-/* Folder inside folder: the "New folder" row creates a folder inside
- * the CURRENT folder (top level when the path is "All"). */
-var adminFolderId = null;
-var adminPath = [];       // [{id, name}]
-var adminSections = [];  // sections of the current folder
-var adminFoldersById = {};
-
-function renderAdminCrumb() {
-  var html = '<button type="button" class="crumb-btn" data-crumb="">All</button>';
-  adminPath.forEach(function (p, i) {
-    html += '<span class="crumb-sep">/</span><button type="button" class="crumb-btn" data-crumb="' + i + '">' + esc(p.name) + '</button>';
-  });
-  $('adminCrumb').innerHTML = html;
-}
-
-function renderAdminSections() {
-  var list = $('adminSectionList');
-  if (adminSections.length === 0) {
-    list.innerHTML = '<p class="muted">No sections.</p>';
-  } else {
-    var html = '';
-    adminSections.forEach(function (s) {
-      html += '<div class="row-item row-static">' + esc(s.name) + '</div>';
-    });
-    list.innerHTML = html;
-  }
-  // Refresh the section pickers on the three upload cards.
-  ['upNoteSection', 'upSheetSection', 'upVideoSection'].forEach(function (id) {
-    var sel = $(id);
-    if (!sel) { return; }
-    var prev = sel.value;
-    var html = '<option value="">No section</option>';
-    adminSections.forEach(function (s) {
-      html += '<option value="' + esc(s.id) + '">' + esc(s.name) + '</option>';
-    });
-    sel.innerHTML = html;
-    if (prev) { sel.value = prev; }
-  });
-}
-
-async function loadAdminFolder() {
-  renderAdminCrumb();
-  $('adminFolderList').innerHTML = '<p class="muted">Loading…</p>';
-  $('adminSectionList').innerHTML = '<p class="muted">Loading…</p>';
-  $('adminFolderStatus').textContent = '';
-  $('adminSectionStatus').textContent = '';
-  try {
-    var fdata = await apiCall('/folders/list', { parentId: adminFolderId });
-    var folders = (fdata && fdata.folders) || [];
-    adminFoldersById = {};
-    folders.forEach(function (f) { adminFoldersById[f.id] = f.name; });
-    if (folders.length === 0) {
-      $('adminFolderList').innerHTML = '<p class="muted">No folders.</p>';
-    } else {
-      var html = '';
-      folders.forEach(function (f) {
-        html += '<button type="button" class="row-item" data-folder="' + esc(f.id) + '">📁 ' + esc(f.name) + '</button>';
-      });
-      $('adminFolderList').innerHTML = html;
-    }
-    var sdata = await apiCall('/sections/list', { folderId: adminFolderId });
-    adminSections = (sdata && sdata.sections) || [];
-    renderAdminSections();
-  } catch (e) {
-    $('adminFolderList').innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
-    $('adminSectionList').innerHTML = '';
-    adminSections = [];
-    renderAdminSections();
-  }
-}
-
-$('adminCrumb').addEventListener('click', function (ev) {
-  var b = ev.target.closest('[data-crumb]');
-  if (!b) { return; }
-  var idx = b.getAttribute('data-crumb');
-  if (idx === '' || idx == null) {
-    adminFolderId = null;
-    adminPath = [];
-  } else {
-    var i = parseInt(idx, 10);
-    adminPath = adminPath.slice(0, i + 1);
-    adminFolderId = adminPath[adminPath.length - 1].id;
-  }
-  loadAdminFolder();
-});
-
-$('adminFolderList').addEventListener('click', function (ev) {
-  var f = ev.target.closest('[data-folder]');
-  if (!f) { return; }
-  var id = f.getAttribute('data-folder');
-  adminFolderId = id;
-  adminPath.push({ id: id, name: adminFoldersById[id] || '' });
-  loadAdminFolder();
-});
-
-$('adminNewFolderBtn').addEventListener('click', async function () {
-  var name = ($('adminNewFolderName').value || '').trim();
-  if (!name) { $('adminFolderStatus').textContent = 'Enter a name.'; return; }
-  var btn = $('adminNewFolderBtn');
-  btn.disabled = true;
-  $('adminFolderStatus').textContent = 'Creating…';
-  try {
-    await apiCall('/folders/create', { name: name, parentId: adminFolderId });
-    $('adminNewFolderName').value = '';
-    $('adminFolderStatus').textContent = 'Folder created.';
-    loadAdminFolder();
-  } catch (e) {
-    $('adminFolderStatus').textContent = e.message || 'Try again.';
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-$('adminNewSectionBtn').addEventListener('click', async function () {
-  if (!adminFolderId) { $('adminSectionStatus').textContent = 'Open a folder first.'; return; }
-  var name = ($('adminNewSectionName').value || '').trim();
-  if (!name) { $('adminSectionStatus').textContent = 'Enter a name.'; return; }
-  var btn = $('adminNewSectionBtn');
-  btn.disabled = true;
-  $('adminSectionStatus').textContent = 'Creating…';
-  try {
-    await apiCall('/sections/create', { name: name, folderId: adminFolderId });
-    $('adminNewSectionName').value = '';
-    $('adminSectionStatus').textContent = 'Section created.';
-    var sdata = await apiCall('/sections/list', { folderId: adminFolderId });
-    adminSections = (sdata && sdata.sections) || [];
-    renderAdminSections();
-  } catch (e) {
-    $('adminSectionStatus').textContent = e.message || 'Try again.';
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-/* One upload card: title + file + section picker -> current folder. */
-async function handleUpload(kind, titleId, fileId, sectionId, statusId, btnId) {
-  var file = $(fileId).files && $(fileId).files[0];
-  var title = ($(titleId).value || '').trim();
-  if (!file) { $(statusId).textContent = 'Choose a file.'; return; }
-  var section = $(sectionId).value || null;
-  var btn = $(btnId);
-  btn.disabled = true;
-  $(statusId).textContent = 'Uploading…';
-  try {
-    await window.MsDrive.upload(file, title, kind, adminFolderId, section);
-    $(statusId).textContent = 'Uploaded.';
-    $(fileId).value = '';
-    $(titleId).value = '';
-  } catch (e) {
-    $(statusId).textContent = e.message || 'Try again.';
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-$('upNoteBtn').addEventListener('click', function () {
-  handleUpload('note', 'upNoteTitle', 'upNoteFile', 'upNoteSection', 'upNoteStatus', 'upNoteBtn');
-});
-$('upSheetBtn').addEventListener('click', function () {
-  handleUpload('sheet', 'upSheetTitle', 'upSheetFile', 'upSheetSection', 'upSheetStatus', 'upSheetBtn');
-});
-$('upVideoBtn').addEventListener('click', function () {
-  handleUpload('video', 'upVideoTitle', 'upVideoFile', 'upVideoSection', 'upVideoStatus', 'upVideoBtn');
-});
-
 /* ================= Hidden chat entry + real chat ================= */
 /* The chat code is the pairing key, so it must survive app updates.
  * It lives in the native encrypted store (like the password), NOT in
@@ -935,7 +901,8 @@ $('chatCodeInput').addEventListener('keydown', function (ev) {
 $('chatLockBackBtn').addEventListener('click', function () { showScreen('screen-home'); });
 
 /* ================= Hidden chat ================= */
-/* Text chat only. Polls /chat/messages every 5s while open. */
+/* Text chat only. Polls /chat/messages every 2s while open, and fetches
+ * immediately when the chat opens (no waiting for the first tick). */
 var chatState = {
   code: null,
   roomId: null,
@@ -999,7 +966,7 @@ function startChat() {
   renderChatPresence();
   loadChatMessages(true);
   stopChatPolling();
-  chatState.pollTimer = setInterval(function () { loadChatMessages(false); }, 5000);
+  chatState.pollTimer = setInterval(function () { loadChatMessages(false); }, 2000);
 }
 
 function formatChatTime(ts) {

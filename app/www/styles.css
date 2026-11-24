@@ -252,6 +252,28 @@ p { margin: 0 0 12px; line-height: 1.55; }
 .row-form .btn-secondary { flex: 0 0 auto; white-space: nowrap; }
 .section-items { margin: 0 0 8px; padding-left: 12px; }
 
+/* ---------- Browser create (admin only, inside a folder) ---------- */
+.browser-create { margin-bottom: 12px; }
+.browser-create .row-form { margin-top: 0; }
+.browser-create .row-form + .row-form { margin-top: 10px; }
+.browser-create p { margin: 6px 0 0; }
+
+/* ---------- Upload cards inside an open section ---------- */
+.section-uploads { margin-top: 12px; }
+.upload-card {
+  background: var(--surface);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-bottom: 10px;
+}
+.upload-title { font-size: 14px; font-weight: 800; margin-bottom: 10px; }
+.upload-card .field-input { margin-bottom: 10px; }
+.upload-card .btn-primary { width: 100%; }
+.upload-card p { margin: 8px 0 0; }
+
 /* ---------- Bottom nav (floating frosted glass) ---------- */
 .bottom-nav {
   position: fixed;
