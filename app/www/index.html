@@ -16,7 +16,7 @@
   <img class="app-logo" id="appLogo" src="icon.png" alt="MS Study logo" />
   <div class="app-title-wrap">
     <div class="app-title" id="appTitle">MS Study</div>
-    <div class="app-subtitle">Padhai, ek jagah</div>
+    <div class="app-subtitle">Study, all in one place</div>
   </div>
   <div class="header-spacer"></div>
   <span class="active-chip" id="activeChip" hidden><span class="active-dot"></span>Active</span>
@@ -30,31 +30,31 @@
     <div class="lock-wrap">
       <img class="lock-logo" src="icon.png" alt="MS Study" />
       <h1 class="lock-title">MS Study</h1>
-      <p class="lock-sub">Apna access password daalo</p>
+      <p class="lock-sub">Enter your access password</p>
       <div class="card lock-card" id="lockCard">
         <div class="error-box" id="lockError" hidden>
           <div class="error-title" id="lockErrorTitle"></div>
           <div class="error-text" id="lockErrorText"></div>
         </div>
         <label class="field-label" for="lockPassword">Access password</label>
-        <input class="field-input" id="lockPassword" type="password" placeholder="Password daalo"
+        <input class="field-input" id="lockPassword" type="password" placeholder="Enter password"
                autocomplete="off" autocapitalize="off" spellcheck="false" />
-        <button class="btn-primary" id="lockBtn" type="button">Login</button>
+        <button class="btn-primary" id="lockBtn" type="button">Sign In</button>
       </div>
       <div class="checking" id="lockChecking" hidden>
         <div class="spinner"></div>
-        <div class="checking-title">Checking access…</div>
-        <div class="checking-text">Password verify ho raha hai, thoda wait karo.</div>
+        <div class="checking-title">Verifying…</div>
+        <div class="checking-text">Verifying your password. Please wait.</div>
       </div>
-      <p class="lock-foot">Password sirf is device par kaam karta hai. Kisi se share na karo.</p>
+      <p class="lock-foot">Your password works only on this device. Do not share it.</p>
     </div>
   </section>
 
   <!-- ================= Home ================= -->
   <section class="screen" id="screen-home" hidden>
     <div class="card welcome-card">
-      <h2 id="homeWelcome">Namaste 👋</h2>
-      <p class="muted">Aaj kya padhna hai? Neeche se section chuno.</p>
+      <h2 id="homeWelcome">Welcome</h2>
+      <p class="muted">What would you like to study today? Choose a section below.</p>
     </div>
     <div class="stats-row">
       <div class="card stat-card"><div class="stat-num" id="statNotes">0</div><div class="stat-label">Notes</div></div>
@@ -63,8 +63,7 @@
     </div>
     <div class="card info-card">
       <h3>Phase 1 — Foundation</h3>
-      <p class="muted">Notes, Tests, Practice aur Classes Phase 2 se aayenge. Abhi sirf
-      password gate, admin aur update taiyaar hai.</p>
+      <p class="muted">Notes, Tests, Practice and Classes arrive in Phase 2. For now, sign-in, admin and updates are ready.</p>
     </div>
   </section>
 
@@ -73,7 +72,7 @@
     <div class="card empty-state">
       <div class="empty-icon">📚</div>
       <h2>Notes</h2>
-      <p class="muted">Notes — Phase 2 me aayega.</p>
+      <p class="muted">Notes arrive in Phase 2.</p>
     </div>
   </section>
 
@@ -81,7 +80,7 @@
     <div class="card empty-state">
       <div class="empty-icon">📝</div>
       <h2>Tests</h2>
-      <p class="muted">Tests — Phase 2 me aayega.</p>
+      <p class="muted">Tests arrive in Phase 2.</p>
     </div>
   </section>
 
@@ -89,7 +88,7 @@
     <div class="card empty-state">
       <div class="empty-icon">✏️</div>
       <h2>Practice</h2>
-      <p class="muted">Practice — Phase 2 me aayega.</p>
+      <p class="muted">Practice arrives in Phase 2.</p>
     </div>
   </section>
 
@@ -97,7 +96,7 @@
     <div class="card empty-state">
       <div class="empty-icon">🎥</div>
       <h2>Classes</h2>
-      <p class="muted">Classes — Phase 2 me aayega.</p>
+      <p class="muted">Classes arrive in Phase 2.</p>
     </div>
   </section>
 
@@ -109,42 +108,42 @@
     </div>
 
     <div class="card">
-      <h3>Naya user password banao</h3>
-      <p class="muted">Ek naya code banega. Sirf EK baar dikhega — turant copy karke user ko bhejo.</p>
-      <button class="btn-primary" id="adminCreateBtn" type="button">Naya password banao</button>
+      <h3>Create a user password</h3>
+      <p class="muted">A new code will be generated. It is shown only once — copy it and send it to the user right away.</p>
+      <button class="btn-primary" id="adminCreateBtn" type="button">Create password</button>
       <div class="code-card" id="adminCreateResult" hidden>
-        <div class="code-label">Naya password (sirf ek baar dikhega)</div>
+        <div class="code-label">New password (shown only once)</div>
         <div class="code-value" id="adminNewCodeText"></div>
-        <button class="btn-secondary" id="adminCopyBtn" type="button">Copy karo</button>
+        <button class="btn-secondary" id="adminCopyBtn" type="button">Copy</button>
       </div>
     </div>
 
     <div class="card">
       <h3>User passwords</h3>
-      <button class="btn-secondary" id="adminRefreshBtn" type="button">List refresh karo</button>
+      <button class="btn-secondary" id="adminRefreshBtn" type="button">Refresh list</button>
       <div class="table-wrap">
         <table class="admin-table">
           <thead><tr><th>Role</th><th>Device</th><th>Label</th><th>Last used</th><th>Active</th><th></th></tr></thead>
           <tbody id="adminPasswordsBody">
-            <tr><td colspan="6" class="muted">Abhi tak koi list load nahi hui.</td></tr>
+            <tr><td colspan="6" class="muted">No list loaded yet.</td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
     <div class="card">
-      <h3>Drive par note upload karo</h3>
-      <p class="muted">File server ke through Drive par jaati hai. App me kabhi Drive login nahi hota.</p>
+      <h3>Upload a note to Drive</h3>
+      <p class="muted">The file is uploaded to Drive through the server. You never sign in to Drive in the app.</p>
       <label class="field-label" for="adminUploadTitle">Title</label>
-      <input class="field-input" id="adminUploadTitle" type="text" placeholder="Note ka title" autocomplete="off" />
-      <label class="field-label" for="adminUploadFile">File chuno</label>
+      <input class="field-input" id="adminUploadTitle" type="text" placeholder="Note title" autocomplete="off" />
+      <label class="field-label" for="adminUploadFile">Choose a file</label>
       <input class="field-input file-input" id="adminUploadFile" type="file" />
-      <button class="btn-primary" id="adminUploadBtn" type="button">Upload karo</button>
+      <button class="btn-primary" id="adminUploadBtn" type="button">Upload</button>
       <div class="upload-result" id="adminUploadResult" hidden>
         <div class="success-text" id="adminUploadMsg"></div>
-        <label class="field-label" for="adminUploadLink">Direct link (copy karo)</label>
+        <label class="field-label" for="adminUploadLink">Direct link (copy it)</label>
         <input class="field-input" id="adminUploadLink" type="text" readonly />
-        <button class="btn-secondary" id="adminUploadCopyBtn" type="button">Link copy karo</button>
+        <button class="btn-secondary" id="adminUploadCopyBtn" type="button">Copy link</button>
       </div>
     </div>
   </section>
@@ -152,24 +151,24 @@
   <!-- ================= Hidden chat — lock ================= -->
   <section class="screen" id="screen-chat-lock" hidden>
     <div class="lock-wrap">
-      <h2 id="chatLockTitle">Chat code daalo</h2>
-      <p class="muted" id="chatLockSub">Hidden chat kholne ke liye code daalo.</p>
+      <h2 id="chatLockTitle">Enter chat code</h2>
+      <p class="muted" id="chatLockSub">Enter the code to open the hidden chat.</p>
       <div class="card lock-card" id="chatLockCard">
         <div class="error-box" id="chatLockError" hidden>
-          <div class="error-title">Galat code</div>
-          <div class="error-text">Code sahi nahi hai. Dobara try karo.</div>
+          <div class="error-title">Incorrect code</div>
+          <div class="error-text">The code is incorrect. Please try again.</div>
         </div>
         <label class="field-label" for="chatCodeInput">Chat code</label>
-        <input class="field-input" id="chatCodeInput" type="password" placeholder="Code daalo"
+        <input class="field-input" id="chatCodeInput" type="password" placeholder="Enter code"
                autocomplete="off" autocapitalize="off" spellcheck="false" />
         <div id="chatCodeConfirmWrap" hidden>
-          <label class="field-label" for="chatCodeConfirm">Code dobara daalo (confirm)</label>
-          <input class="field-input" id="chatCodeConfirm" type="password" placeholder="Code confirm karo"
+          <label class="field-label" for="chatCodeConfirm">Enter the code again (confirm)</label>
+          <input class="field-input" id="chatCodeConfirm" type="password" placeholder="Confirm code"
                  autocomplete="off" autocapitalize="off" spellcheck="false" />
         </div>
-        <button class="btn-primary" id="chatLockBtn" type="button">Khol lo</button>
+        <button class="btn-primary" id="chatLockBtn" type="button">Open chat</button>
       </div>
-      <button class="btn-ghost" id="chatLockBackBtn" type="button">← Wapas</button>
+      <button class="btn-ghost" id="chatLockBackBtn" type="button">← Back</button>
     </div>
   </section>
 
@@ -178,8 +177,8 @@
     <div class="card empty-state">
       <div class="empty-icon">💬</div>
       <h2>Chat</h2>
-      <p class="muted">Chat — Phase 5 me aayega.</p>
-      <button class="btn-secondary" id="chatBackBtn" type="button">Home wapas jao</button>
+      <p class="muted">Chat arrives in Phase 5.</p>
+      <button class="btn-secondary" id="chatBackBtn" type="button">Back to Home</button>
     </div>
   </section>
 
@@ -197,10 +196,10 @@
 <!-- ================= In-app update dialog ================= -->
 <div class="dialog-overlay" id="updateDialog" hidden>
   <div class="card dialog-card">
-    <h2 id="updateTitle">Naya update aaya hai 🎉</h2>
+    <h2 id="updateTitle">Update available</h2>
     <p class="muted" id="updateChangelog"></p>
     <div class="dialog-actions">
-      <button class="btn-primary" id="updateBtn" type="button">Update karo</button>
+      <button class="btn-primary" id="updateBtn" type="button">Update</button>
       <button class="btn-ghost" id="updateLaterBtn" type="button">Later</button>
     </div>
     <p class="muted small" id="updateStatus"></p>

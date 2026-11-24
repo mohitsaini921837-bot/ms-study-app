@@ -32,8 +32,8 @@ var SERVER_URL = 'https://ms-study-server.onrender.com';
 /* ^^^ PLANNED Render URL — UPDATE THIS once the real Render service is
  * live if its URL differs. The app will not log in until this points
  * at the real MS Study server. */
-var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/version.json';
-var CURRENT_VERSION_CODE = 1;
+var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
+var CURRENT_VERSION_CODE = 2;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -123,11 +123,11 @@ document.querySelectorAll('.nav-btn').forEach(function (btn) {
 
 /* ================= Password gate ================= */
 var GATE_MSGS = {
-  incorrect: ['Galat password', 'Ye password server par save nahi hai. Dobara check karke daalo.'],
-  kicked: ['Dusre device pe login hai', 'Is password se ab dusre device pe login hai.'],
-  unavailable: ['Server se connect nahi ho paya', 'Internet check karke dobara try karo.'],
-  rate_limited: ['Thoda ruko', 'Bahut zyada try ho gaye. Thodi der baad try karo.'],
-  empty: ['Password daalo', 'Apna access password daalo.']
+  incorrect: ['Incorrect password', 'This password is not recognized. Please check and try again.'],
+  kicked: ['Signed in on another device', 'This password is now signed in on another device.'],
+  unavailable: ['Unable to connect', 'Please check your connection and try again.'],
+  rate_limited: ['Please wait', 'Too many attempts. Please try again shortly.'],
+  empty: ['Enter your password', 'Please enter your access password.']
 };
 
 function showLockError(key) {
@@ -187,7 +187,7 @@ async function submitLogin() {
       enterApp();
     } else if (r.result === 'kicked') {
       showLockChecking(false);
-      showToast('Is password se ab dusre device pe login hai');
+      showToast('This password is now signed in on another device.');
       showLockError('kicked');
     } else if (r.result && GATE_MSGS[r.result]) {
       showLockChecking(false);
@@ -225,7 +225,7 @@ function lockout(reason) {
   showScreen('screen-lock');
   showLockChecking(false);
   if (reason === 'kicked') {
-    showToast('Is password se ab dusre device pe login hai');
+    showToast('This password is now signed in on another device.');
     showLockError('kicked');
   } else if (reason === 'incorrect') {
     showLockError('incorrect');
@@ -318,12 +318,12 @@ $('adminCreateBtn').addEventListener('click', async function () {
   try {
     var data = await adminPost('/admin/create-password', {});
     var code = data.code || data.password || '';
-    if (!code) { throw new Error('Server ne koi code nahi diya'); }
+    if (!code) { throw new Error('The server did not return a code.'); }
     $('adminNewCodeText').textContent = code;
     $('adminCreateResult').hidden = false;
-    showToast('Naya password ban gaya — abhi copy kar lo');
+    showToast('New password created — copy it now.');
   } catch (e) {
-    showToast('Password ban nahi paya: ' + e.message);
+    showToast('Could not create password: ' + e.message);
   } finally {
     btn.disabled = false;
   }
@@ -332,8 +332,8 @@ $('adminCreateBtn').addEventListener('click', async function () {
 $('adminCopyBtn').addEventListener('click', async function () {
   try {
     await navigator.clipboard.writeText($('adminNewCodeText').textContent);
-    showToast('Copy ho gaya');
-  } catch (e) { showToast('Copy nahi ho paya — code ko haath se likh lo'); }
+    showToast('Copied.');
+  } catch (e) { showToast('Could not copy — please note the code down.'); }
 });
 
 function esc(s) {
@@ -349,7 +349,7 @@ $('adminRefreshBtn').addEventListener('click', async function () {
     var data = await adminPost('/admin/passwords', {});
     var rows = data.passwords || data.items || data || [];
     if (!Array.isArray(rows) || rows.length === 0) {
-      $('adminPasswordsBody').innerHTML = '<tr><td colspan="6" class="muted">Koi password nahi mila.</td></tr>';
+      $('adminPasswordsBody').innerHTML = '<tr><td colspan="6" class="muted">No passwords found.</td></tr>';
       return;
     }
     // Batched render: one innerHTML write for the whole table.
@@ -365,7 +365,7 @@ $('adminRefreshBtn').addEventListener('click', async function () {
     });
     $('adminPasswordsBody').innerHTML = html;
   } catch (e) {
-    showToast('List load nahi hui: ' + e.message);
+    showToast('Could not load the list: ' + e.message);
   } finally {
     btn.disabled = false;
   }
@@ -379,10 +379,10 @@ $('adminPasswordsBody').addEventListener('click', async function (ev) {
   btn.disabled = true;
   try {
     await adminPost('/admin/deactivate', { id: id });
-    showToast('Password deactivate kar diya');
+    showToast('Password deactivated.');
     $('adminRefreshBtn').click();
   } catch (e) {
-    showToast('Deactivate nahi ho paya: ' + e.message);
+    showToast('Could not deactivate: ' + e.message);
     btn.disabled = false;
   }
 });
@@ -391,19 +391,19 @@ $('adminPasswordsBody').addEventListener('click', async function (ev) {
 $('adminUploadBtn').addEventListener('click', async function () {
   var file = $('adminUploadFile').files && $('adminUploadFile').files[0];
   var title = ($('adminUploadTitle').value || '').trim();
-  if (!file) { showToast('Pehle koi file chuno'); return; }
+  if (!file) { showToast('Please choose a file first.'); return; }
   var btn = $('adminUploadBtn');
   btn.disabled = true;
   $('adminUploadResult').hidden = true;
   try {
     var data = await window.MsDrive.upload(file, title, 'note');
     var link = data.directLink || data.url || data.link || '';
-    $('adminUploadMsg').textContent = 'Upload ho gaya ✅';
+    $('adminUploadMsg').textContent = 'Upload complete.';
     $('adminUploadLink').value = link;
     $('adminUploadResult').hidden = false;
-    showToast('Upload ho gaya');
+    showToast('Upload complete.');
   } catch (e) {
-    showToast('Upload nahi ho paya: ' + e.message);
+    showToast('Upload failed: ' + e.message);
   } finally {
     btn.disabled = false;
   }
@@ -412,8 +412,8 @@ $('adminUploadBtn').addEventListener('click', async function () {
 $('adminUploadCopyBtn').addEventListener('click', async function () {
   try {
     await navigator.clipboard.writeText($('adminUploadLink').value);
-    showToast('Link copy ho gaya');
-  } catch (e) { showToast('Copy nahi ho paya'); }
+    showToast('Link copied.');
+  } catch (e) { showToast('Could not copy.'); }
 });
 
 /* ================= Hidden chat entry (lock only — real chat = Phase 5) ================= */
@@ -428,15 +428,15 @@ function openChatLock() {
   $('chatCodeInput').value = '';
   $('chatCodeConfirm').value = '';
   if (hasCode) {
-    $('chatLockTitle').textContent = 'Chat code daalo';
-    $('chatLockSub').textContent = 'Hidden chat kholne ke liye code daalo.';
+    $('chatLockTitle').textContent = 'Enter chat code';
+    $('chatLockSub').textContent = 'Enter the code to open the hidden chat.';
     $('chatCodeConfirmWrap').hidden = true;
-    $('chatLockBtn').textContent = 'Khol lo';
+    $('chatLockBtn').textContent = 'Open chat';
   } else {
-    $('chatLockTitle').textContent = 'Chat code set karo';
-    $('chatLockSub').textContent = 'Pehli baar ek code set karo. Wahi code dono taraf use hoga.';
+    $('chatLockTitle').textContent = 'Set a chat code';
+    $('chatLockSub').textContent = 'Set a code for the first time. The same code is used on both sides.';
     $('chatCodeConfirmWrap').hidden = false;
-    $('chatLockBtn').textContent = 'Set karo';
+    $('chatLockBtn').textContent = 'Set code';
   }
   showScreen('screen-chat-lock');
 }
@@ -506,7 +506,7 @@ async function checkForUpdate() {
     var data = await res.json();
     if (data && data.versionCode > CURRENT_VERSION_CODE) {
       pendingUpdate = data;
-      $('updateChangelog').textContent = data.changelog || ('Version ' + data.version + ' available hai.');
+      $('updateChangelog').textContent = data.changelog || ('Version ' + data.version + ' is available.');
       $('updateDialog').hidden = false;
     }
   } catch (e) { /* no update check offline — stay on current version */ }
@@ -521,15 +521,15 @@ $('updateBtn').addEventListener('click', async function () {
   if (!pendingUpdate || !pendingUpdate.apkUrl) { return; }
   var btn = $('updateBtn');
   btn.disabled = true;
-  $('updateStatus').textContent = 'APK download ho raha hai…';
+  $('updateStatus').textContent = 'Downloading update…';
   try {
     var installer = capPlugin('ApkInstaller');
     var fs = capPlugin('Filesystem');
     if (!installer || !installer.installApk || !fs) {
-      throw new Error('Installer is app version me available nahi hai');
+      throw new Error('The installer is not available in this version.');
     }
     var res = await fetch(pendingUpdate.apkUrl);
-    if (!res.ok) { throw new Error('APK download nahi ho paya (' + res.status + ')'); }
+    if (!res.ok) { throw new Error('Could not download the update (' + res.status + ')'); }
     var buf = await res.arrayBuffer();
     var bytes = new Uint8Array(buf);
     var binary = '';
@@ -545,11 +545,11 @@ $('updateBtn').addEventListener('click', async function () {
       directory: 'CACHE',
       recursive: true
     });
-    $('updateStatus').textContent = 'Installer khul raha hai…';
+    $('updateStatus').textContent = 'Opening installer…';
     await installer.installApk({ fileName: fileName });
     $('updateDialog').hidden = true;
   } catch (e) {
-    $('updateStatus').textContent = 'Update nahi ho paya: ' + e.message;
+    $('updateStatus').textContent = 'Update failed: ' + e.message;
   } finally {
     btn.disabled = false;
   }
@@ -560,6 +560,9 @@ $('updateBtn').addEventListener('click', async function () {
  * memory only, so there is nothing stored to silently revalidate with.
  * (Unlike PW, which stores the password encrypted natively.) */
 showScreen('screen-lock');
+/* Check for an update on launch too (not only after login), so the app
+ * can update itself even before signing in. */
+checkForUpdate();
 if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.StatusBar) {
   try {
     window.Capacitor.Plugins.StatusBar.setStyle({ style: 'LIGHT' });

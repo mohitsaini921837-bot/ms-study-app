@@ -57,7 +57,7 @@
   /* Upload one file. kind: "note" | "sheet" | "video" (Phase 1: "note").
    * Returns the server response, which includes the direct link. */
   async function driveUpload(file, title, kind) {
-    if (!file) { throw new Error('Koi file select nahi ki'); }
+    if (!file) { throw new Error('No file selected.'); }
     var auth = authHeaders();
     var form = new FormData();
     form.append('password', auth.password);
