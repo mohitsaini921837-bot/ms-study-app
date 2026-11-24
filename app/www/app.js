@@ -28,12 +28,12 @@
 'use strict';
 
 /* ================= Config ================= */
-var SERVER_URL = 'https://ms-study-server.onrender.com';
+var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 /* ^^^ PLANNED Render URL — UPDATE THIS once the real Render service is
  * live if its URL differs. The app will not log in until this points
  * at the real MS Study server. */
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 2;
+var CURRENT_VERSION_CODE = 3;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };

@@ -50,7 +50,7 @@ public class MsAccessPlugin extends Plugin {
 
     // PLANNED Render URL — must match SERVER_URL in www/app.js. Update
     // both together once the real Render service is live.
-    public static final String VALIDATE_URL = "https://ms-study-server.onrender.com/validate";
+    public static final String VALIDATE_URL = "https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api/validate";
 
     private static final Object VALIDATE_LOCK = new Object();
 
