@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 6;
+var CURRENT_VERSION_CODE = 7;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -299,6 +299,15 @@ document.addEventListener('visibilitychange', function () {
  * failure the user goes back to the lock screen (lockout). Other
  * failures surface as one short line: "Not allowed." / "Try again." */
 async function apiCall(path, extra) {
+  // Device id must always be set before any server call. The saved-login
+  // path (trySavedLogin) used to skip it, so the first calls after an
+  // auto-login sent an empty deviceId and the server answered
+  // "incorrect" — folders/sections looked unmade and invisible.
+  if (!window.MsStudySession.deviceId) {
+    var dinfo = await getDeviceInfo();
+    window.MsStudySession.deviceId = dinfo.deviceId;
+    window.MsStudySession.deviceLabel = dinfo.deviceLabel;
+  }
   var body = { password: window.MsStudySession.password, deviceId: window.MsStudySession.deviceId };
   Object.keys(extra || {}).forEach(function (k) { body[k] = extra[k]; });
   var res = await fetch(SERVER_URL + path, {
@@ -1325,6 +1334,11 @@ async function trySavedLogin() {
       if (r && r.result === 'valid' && r.password) {
         window.MsStudySession.password = r.password;
         window.MsStudySession.role = r.role || 'user';
+        // Populate the device id now, not 15s later at the first
+        // revalidation — every server call needs it (see apiCall).
+        var dinfo = await getDeviceInfo();
+        window.MsStudySession.deviceId = dinfo.deviceId;
+        window.MsStudySession.deviceLabel = dinfo.deviceLabel;
         enterApp();
         return;
       }
