@@ -95,25 +95,25 @@ jobs:
 
       - name: Rename APK
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk MS-Study-v1.0.2.apk
-          ls -l MS-Study-v1.0.2.apk
+          cp android/app/build/outputs/apk/release/app-release.apk MS-Study-v1.0.3.apk
+          ls -l MS-Study-v1.0.3.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ms-study-v1.0.2-apk
-          path: app/MS-Study-v1.0.2.apk
+          name: ms-study-v1.0.3-apk
+          path: app/MS-Study-v1.0.3.apk
           if-no-files-found: error
 
-      - name: Create GitHub Release v1.0.2
+      - name: Create GitHub Release v1.0.3
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd "$GITHUB_WORKSPACE"
-          if gh release view v1.0.2 >/dev/null 2>&1; then
-            gh release upload v1.0.2 app/MS-Study-v1.0.2.apk --clobber
+          if gh release view v1.0.3 >/dev/null 2>&1; then
+            gh release upload v1.0.3 app/MS-Study-v1.0.3.apk --clobber
           else
-            gh release create v1.0.2 app/MS-Study-v1.0.2.apk \
-              --title "MS Study v1.0.2" \
+            gh release create v1.0.3 app/MS-Study-v1.0.3.apk \
+              --title "MS Study v1.0.3" \
               --notes "First release — foundation: password gate, admin, in-app update, hidden chat entry."
           fi
