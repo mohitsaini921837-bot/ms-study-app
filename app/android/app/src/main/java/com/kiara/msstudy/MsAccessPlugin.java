@@ -285,6 +285,34 @@ public class MsAccessPlugin extends Plugin {
         }).start();
     }
 
+    /** Hidden-chat code: read the stored code (null if none set). */
+    @PluginMethod
+    public void getChatCode(PluginCall call) {
+        String code = MsSessionStore.readChatCode(getContext());
+        JSObject ret = new JSObject();
+        if (code != null) {
+            ret.put("code", code);
+        }
+        call.resolve(ret);
+    }
+
+    /** Hidden-chat code: store a new code (encrypted natively). */
+    @PluginMethod
+    public void setChatCode(PluginCall call) {
+        String code = call.getString("code", "");
+        if (code != null && !code.isEmpty()) {
+            MsSessionStore.saveChatCode(getContext(), code);
+        }
+        call.resolve();
+    }
+
+    /** Hidden-chat code: clear it (used by "Change code"). */
+    @PluginMethod
+    public void clearChatCode(PluginCall call) {
+        MsSessionStore.clearChatCode(getContext());
+        call.resolve();
+    }
+
     /** Current session state (no password is ever returned to JS). */
     @PluginMethod
     public void getSessionStatus(PluginCall call) {

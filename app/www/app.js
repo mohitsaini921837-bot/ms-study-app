@@ -802,13 +802,44 @@ $('upVideoBtn').addEventListener('click', function () {
 });
 
 /* ================= Hidden chat entry (lock only — real chat = Phase 5) ================= */
+/* The chat code is the pairing key, so it must survive app updates.
+ * It lives in the native encrypted store (like the password), NOT in
+ * WebView localStorage. localStorage is kept only as a fallback, and a
+ * code found there is migrated to the native store on first read. */
 var CHAT_CODE_KEY = 'ms_chat_code';
 var LONG_PRESS_MS = 3000;
 var longPressTimer = null;
 
-function openChatLock() {
-  var hasCode = null;
-  try { hasCode = window.localStorage.getItem(CHAT_CODE_KEY); } catch (e) {}
+function chatPlugin() {
+  return capPlugin('MsAccess');
+}
+
+async function getStoredChatCode() {
+  var plugin = chatPlugin();
+  if (plugin && plugin.getChatCode) {
+    try {
+      var r = await plugin.getChatCode();
+      if (r && r.code) { return r.code; }
+    } catch (e) {}
+  }
+  var local = null;
+  try { local = window.localStorage.getItem(CHAT_CODE_KEY); } catch (e) {}
+  if (local && plugin && plugin.setChatCode) {
+    try { await plugin.setChatCode({ code: local }); } catch (e) {}
+  }
+  return local;
+}
+
+async function setStoredChatCode(code) {
+  var plugin = chatPlugin();
+  if (plugin && plugin.setChatCode) {
+    try { await plugin.setChatCode({ code: code }); } catch (e) {}
+  }
+  try { window.localStorage.setItem(CHAT_CODE_KEY, code); } catch (e) {}
+}
+
+async function openChatLock() {
+  var hasCode = await getStoredChatCode();
   $('chatLockError').hidden = true;
   $('chatCodeInput').value = '';
   $('chatCodeConfirm').value = '';
@@ -848,11 +879,10 @@ function armLongPress() {
   logo.addEventListener('contextmenu', function (ev) { ev.preventDefault(); });
 })();
 
-$('chatLockBtn').addEventListener('click', function () {
+$('chatLockBtn').addEventListener('click', async function () {
   var code = ($('chatCodeInput').value || '').trim();
-  var stored = null;
-  try { stored = window.localStorage.getItem(CHAT_CODE_KEY); } catch (e) {}
   if (!code) { return; }
+  var stored = await getStoredChatCode();
   if (!stored) {
     var confirmCode = ($('chatCodeConfirm').value || '').trim();
     if (code !== confirmCode) {
@@ -862,7 +892,7 @@ $('chatLockBtn').addEventListener('click', function () {
       $('chatLockCard').classList.add('shake');
       return;
     }
-    try { window.localStorage.setItem(CHAT_CODE_KEY, code); } catch (e) {}
+    await setStoredChatCode(code);
     showScreen('screen-chat');
     return;
   }

@@ -179,6 +179,58 @@ public final class MsSessionStore {
     }
 
     /**
+     * The hidden-chat code, AES-256/GCM encrypted (same key/mechanism
+     * as the session). The chat code is the pairing key, so it must
+     * survive app updates — WebView localStorage is not reliable
+     * enough for it. Stored here on first set; read on every chat
+     * open. Never cleared by logout (the chat is separate from the
+     * study password); it is cleared only by "Change code".
+     */
+    private static final String KEY_CHAT_CODE = "chat_code";
+
+    public static synchronized void saveChatCode(Context ctx, String code) {
+        try {
+            if (code == null || code.isEmpty()) {
+                return;
+            }
+            String encrypted = encrypt(code);
+            if (encrypted == null) {
+                return;
+            }
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putString(KEY_CHAT_CODE, encrypted).apply();
+        } catch (Exception e) {
+            // Never crash the app for storage trouble.
+        }
+    }
+
+    public static synchronized String readChatCode(Context ctx) {
+        try {
+            String encrypted = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString(KEY_CHAT_CODE, null);
+            if (encrypted == null) {
+                return null;
+            }
+            String plain = decrypt(encrypted);
+            if (plain == null || plain.isEmpty()) {
+                return null;
+            }
+            return plain;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public static synchronized void clearChatCode(Context ctx) {
+        try {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().remove(KEY_CHAT_CODE).apply();
+        } catch (Exception e) {
+            // Best effort only.
+        }
+    }
+
+    /**
      * Device identity: a UUID generated ONCE and stored AES-encrypted.
      * Same mechanism as PW's fallback id (PwSessionStore.getDeviceId),
      * but here it is the ONLY identity source — there is no Android ID.
