@@ -37,11 +37,12 @@ import java.nio.charset.StandardCharsets;
  * Differences from PW (deliberate, per the MS Study spec):
  *   - NO expiry anywhere: no expiresAt, no validity countdown, no pill.
  *     A valid password stays valid until the server says otherwise.
- *   - The password is NEVER stored natively. MsSessionStore holds only
- *     {deviceId, role}. The JS side keeps the password in memory only
- *     and passes it to revalidate() on every 15s/resume check — that is
- *     why revalidate() takes a password parameter, unlike PW's
- *     revalidateSaved() which reads a stored password.
+ *   - The password is stored AES-encrypted natively (MsSessionStore),
+ *     exactly like PW. That is what keeps the user signed in across an
+ *     app update: an update restarts the app and wipes JS memory, but
+ *     the encrypted password survives, so boot calls revalidateSaved()
+ *     to silently revalidate and skip the lock screen. The stored
+ *     password is cleared on logout, kick, or "incorrect".
  *   - Device identity is the encrypted UUID from MsSessionStore, not
  *     the Android ID. deviceLabel is "Android <model>".
  */
@@ -203,7 +204,8 @@ public class MsAccessPlugin extends Plugin {
         return ret;
     }
 
-    /** User-initiated check (login submit). Saves {deviceId, role} on valid. */
+    /** User-initiated check (login submit). Saves {deviceId, role} and the
+     *  password (encrypted) on valid, so later launches stay signed in. */
     @PluginMethod
     public void validate(PluginCall call) {
         final String password = call.getString("password", "");
@@ -215,6 +217,41 @@ public class MsAccessPlugin extends Plugin {
                 if ("valid".equals(v.result)) {
                     MsSessionStore.save(getContext(),
                             MsSessionStore.getDeviceId(getContext()), v.role);
+                    MsSessionStore.savePassword(getContext(), password);
+                }
+                call.resolve(toJs(v));
+            }
+        }).start();
+    }
+
+    /**
+     * Boot-time silent login: reads the stored password and revalidates
+     * it (never rebinds). On "valid" the password is returned so JS can
+     * hold it in memory for the 15s/resume checks. On "kicked" or
+     * "incorrect" the stored password is cleared. On "unavailable" or
+     * "rate_limited" the stored password is kept for the next boot.
+     */
+    @PluginMethod
+    public void revalidateSaved(PluginCall call) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String password = MsSessionStore.readPassword(getContext());
+                if (password == null || password.isEmpty()) {
+                    call.resolve(toJs(new Validation("no_session", null, null)));
+                    return;
+                }
+                Validation v = validateNow(getContext(), password, true, "revalidate");
+                if ("valid".equals(v.result)) {
+                    MsSessionStore.save(getContext(),
+                            MsSessionStore.getDeviceId(getContext()), v.role);
+                    JSObject ret = toJs(v);
+                    ret.put("password", password);
+                    call.resolve(ret);
+                    return;
+                }
+                if ("kicked".equals(v.result) || "incorrect".equals(v.result)) {
+                    MsSessionStore.clearPassword(getContext());
                 }
                 call.resolve(toJs(v));
             }

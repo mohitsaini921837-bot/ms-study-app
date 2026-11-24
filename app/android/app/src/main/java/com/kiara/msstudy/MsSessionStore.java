@@ -28,9 +28,13 @@ import javax.crypto.spec.GCMParameterSpec;
  *     session data.
  *
  * Differences from PW (deliberate, per the MS Study spec):
- *   - The session holds {deviceId, role} ONLY — NO password, NO expiry.
- *     The password lives in JS memory only (app.js) and is never stored.
- *     A fresh launch therefore always asks for the password again.
+ *   - The session holds {deviceId, role} and, since v1.0.3, the access
+ *     password too — stored AES-encrypted, exactly like PW stores its
+ *     password. This is what keeps the user signed in across an app
+ *     update: an update restarts the app and wipes JS memory, but the
+ *     encrypted password survives, so boot can silently revalidate
+ *     and skip the lock screen. The password is cleared on logout,
+ *     kick, or an "incorrect" result.
  *   - The device identity is a UUID generated ONCE and stored encrypted
  *     here — NOT the Android ID. (PW uses the Android ID because its
  *     customers' passwords were already bound to it; MS Study has no
@@ -41,6 +45,7 @@ public final class MsSessionStore {
 
     private static final String PREFS = "msstudy.access.session.v1";
     private static final String KEY_SESSION = "session";
+    private static final String KEY_PASSWORD = "password";
     private static final String KEY_DEVICE_ID = "msstudy.installation.device.v1";
     private static final String KEY_ALIAS = "msstudy.access.key.v1";
     private static final String ANDROID_KEYSTORE = "AndroidKeyStore";
@@ -118,7 +123,56 @@ public final class MsSessionStore {
         cachedSession = null;
         try {
             ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    .edit().remove(KEY_SESSION).apply();
+                    .edit().remove(KEY_SESSION).remove(KEY_PASSWORD).apply();
+        } catch (Exception e) {
+            // Best effort only.
+        }
+    }
+
+    /**
+     * The access password, AES-256/GCM encrypted (same key/mechanism as
+     * the session). Stored on a successful login so a fresh launch —
+     * including after an app update, which wipes JS memory — can
+     * silently revalidate and skip the lock screen. Cleared together
+     * with the session on logout, kick, or "incorrect".
+     */
+    public static synchronized void savePassword(Context ctx, String password) {
+        try {
+            if (password == null || password.isEmpty()) {
+                return;
+            }
+            String encrypted = encrypt(password);
+            if (encrypted == null) {
+                return;
+            }
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putString(KEY_PASSWORD, encrypted).apply();
+        } catch (Exception e) {
+            // Never crash the app for storage trouble.
+        }
+    }
+
+    public static synchronized String readPassword(Context ctx) {
+        try {
+            String encrypted = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString(KEY_PASSWORD, null);
+            if (encrypted == null) {
+                return null;
+            }
+            String plain = decrypt(encrypted);
+            if (plain == null || plain.isEmpty()) {
+                return null;
+            }
+            return plain;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public static synchronized void clearPassword(Context ctx) {
+        try {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().remove(KEY_PASSWORD).apply();
         } catch (Exception e) {
             // Best effort only.
         }

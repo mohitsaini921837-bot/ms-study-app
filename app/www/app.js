@@ -189,7 +189,8 @@ async function submitLogin() {
   try {
     var r = await validatePassword(pw);
     if (r.result === 'valid') {
-      // Password -> memory ONLY. Session store keeps {deviceId, role}.
+      // Password -> memory, and encrypted natively (plugin saves it),
+      // so the next launch stays signed in, even after an update.
       window.MsStudySession.password = pw;
       window.MsStudySession.role = r.role || 'user';
       enterApp();
@@ -938,10 +939,26 @@ $('updateBtn').addEventListener('click', async function () {
 });
 
 /* ================= Boot ================= */
-/* Fresh launch always shows the password gate: the password lives in
- * memory only, so there is nothing stored to silently revalidate with.
- * (Unlike PW, which stores the password encrypted natively.) */
-showScreen('screen-lock');
+/* Stay signed in across launches and updates: the password is stored
+ * AES-encrypted natively (like PW), so boot silently revalidates it.
+ * Only if there is no stored password (or it was kicked/incorrect)
+ * does the lock screen show. */
+async function trySavedLogin() {
+  var plugin = capPlugin('MsAccess');
+  if (plugin && plugin.revalidateSaved) {
+    try {
+      var r = await plugin.revalidateSaved();
+      if (r && r.result === 'valid' && r.password) {
+        window.MsStudySession.password = r.password;
+        window.MsStudySession.role = r.role || 'user';
+        enterApp();
+        return;
+      }
+    } catch (e) { /* fall through to the lock screen */ }
+  }
+  showScreen('screen-lock');
+}
+trySavedLogin();
 /* Check for an update on launch too (not only after login), so the app
  * can update itself even before signing in. */
 checkForUpdate();
