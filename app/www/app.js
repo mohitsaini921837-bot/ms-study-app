@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 7;
+var CURRENT_VERSION_CODE = 8;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -513,8 +513,15 @@ function createBrowser(opts) {
     try {
       var fdata = await apiCall('/folders/list', { parentId: state.folderId });
       var folders = (fdata && fdata.folders) || [];
-      var sdata = await apiCall('/sections/list', { folderId: state.folderId });
-      var sections = (sdata && sdata.sections) || [];
+      // Sections live INSIDE a folder — at the top level ("All") there is
+      // no folder open, and /sections/list answers "unavailable" without
+      // one. Calling it anyway made the whole list fail with "Try again."
+      // and no folder ever showed, even though creates were succeeding.
+      var sections = [];
+      if (state.folderId) {
+        var sdata = await apiCall('/sections/list', { folderId: state.folderId });
+        sections = (sdata && sdata.sections) || [];
+      }
       var idata = await apiCall('/items/list', { folderId: state.folderId, sectionId: null });
       var items = (idata && idata.items) || [];
       if (opts.kind) { items = items.filter(function (it) { return it.kind === opts.kind; }); }
