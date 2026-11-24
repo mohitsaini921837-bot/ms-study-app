@@ -125,7 +125,7 @@ document.querySelectorAll('.nav-btn').forEach(function (btn) {
 var GATE_MSGS = {
   incorrect: ['Galat password', 'Ye password server par save nahi hai. Dobara check karke daalo.'],
   kicked: ['Dusre device pe login hai', 'Is password se ab dusre device pe login hai.'],
-  unavailable: ['Server jag raha hai', 'Thoda wait karke dobara try karo. Free server ko jaagne me time lagta hai.'],
+  unavailable: ['Server se connect nahi ho paya', 'Internet check karke dobara try karo.'],
   rate_limited: ['Thoda ruko', 'Bahut zyada try ho gaye. Thodi der baad try karo.'],
   empty: ['Password daalo', 'Apna access password daalo.']
 };
