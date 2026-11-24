@@ -381,7 +381,7 @@ function createBrowser(opts) {
     if (btn) { btn.disabled = true; }
     setCreateStatus('folder', 'Creating…');
     try {
-      await apiCall('/folders/create', { name: name, parentId: state.folderId });
+      await apiCall('/folders/create', { name: name, parentId: state.folderId, scope: opts.scope });
       if (input) { input.value = ''; }
       setCreateStatus('folder', 'Folder created.');
       load();
@@ -484,6 +484,35 @@ function createBrowser(opts) {
     }
   }
 
+  /* Admin-only delete: confirm first; the folder delete also removes
+   * its subfolders, sections and items server-side. If the deleted folder
+   * is the one (or an ancestor of the one) currently open, go back to
+   * the top level instead of showing a dead breadcrumb. */
+  async function deleteFolder(folderId) {
+    if (window.MsStudySession.role !== 'admin') { return; }
+    if (!window.confirm('Delete this folder and everything inside it?')) { return; }
+    try {
+      await apiCall('/folders/delete', { folderId: folderId });
+      if (state.folderId === folderId || state.path.some(function (p) { return p.id === folderId; })) {
+        state.folderId = null; state.path = []; state.expanded = {};
+      }
+      load();
+    } catch (e) {
+      setCreateStatus('folder', e.message || 'Try again.');
+    }
+  }
+
+  async function deleteSection(sectionId) {
+    if (window.MsStudySession.role !== 'admin') { return; }
+    if (!window.confirm('Delete this section and its items?')) { return; }
+    try {
+      await apiCall('/sections/delete', { sectionId: sectionId });
+      load();
+    } catch (e) {
+      setCreateStatus('section', e.message || 'Try again.');
+    }
+  }
+
   function openFolder(id, name) {
     state.folderId = id;
     state.path.push({ id: id, name: name });
@@ -511,7 +540,7 @@ function createBrowser(opts) {
     renderCreate();
     list.innerHTML = '<p class="muted">Loading…</p>';
     try {
-      var fdata = await apiCall('/folders/list', { parentId: state.folderId });
+      var fdata = await apiCall('/folders/list', { parentId: state.folderId, scope: opts.scope });
       var folders = (fdata && fdata.folders) || [];
       // Sections live INSIDE a folder — at the top level ("All") there is
       // no folder open, and /sections/list answers "unavailable" without
@@ -528,11 +557,14 @@ function createBrowser(opts) {
       state.foldersById = {};
       folders.forEach(function (f) { state.foldersById[f.id] = f.name; });
       var html = '';
+      var isAdmin = window.MsStudySession.role === 'admin';
       folders.forEach(function (f) {
-        html += '<button type="button" class="row-item" data-folder="' + esc(f.id) + '">📁 ' + esc(f.name) + '</button>';
+        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-folder="' + esc(f.id) + '">📁 ' + esc(f.name) + '</button>' +
+          (isAdmin ? '<button type="button" class="row-del" data-del-folder="' + esc(f.id) + '" aria-label="Delete folder">×</button>' : '') + '</div>';
       });
       sections.forEach(function (s) {
-        html += '<button type="button" class="row-item" data-section="' + esc(s.id) + '">▸ ' + esc(s.name) + '</button>';
+        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-section="' + esc(s.id) + '">▸ ' + esc(s.name) + '</button>' +
+          (isAdmin ? '<button type="button" class="row-del" data-del-section="' + esc(s.id) + '" aria-label="Delete section">×</button>' : '') + '</div>';
         html += '<div class="section-items" id="' + opts.list + '-sec-' + esc(s.id) + '" hidden></div>';
       });
       items.forEach(function (it) {
@@ -565,6 +597,10 @@ function createBrowser(opts) {
     var list = $(opts.list);
     if (list) {
       list.addEventListener('click', function (ev) {
+        var df = ev.target.closest('[data-del-folder]');
+        if (df) { deleteFolder(df.getAttribute('data-del-folder')); return; }
+        var ds = ev.target.closest('[data-del-section]');
+        if (ds) { deleteSection(ds.getAttribute('data-del-section')); return; }
         var up = ev.target.closest('[data-up-btn]');
         if (up) { uploadIntoSection(up); return; }
         /* Taps inside an upload card (title / file inputs, status text)
@@ -597,10 +633,12 @@ function createBrowser(opts) {
   return { load: load };
 }
 
-var notesBrowser = createBrowser({ crumb: 'notesCrumb', list: 'notesList', kind: 'note', create: 'notesCreate' });
-var practiceBrowser = createBrowser({ crumb: 'practiceCrumb', list: 'practiceList', kind: 'sheet', create: 'practiceCreate' });
-var classesBrowser = createBrowser({ crumb: 'classesCrumb', list: 'classesList', kind: 'video', create: 'classesCreate' });
-var testsBrowser = createBrowser({ crumb: 'testsCrumb', list: 'testsList', kind: null, create: 'testsCreate' });
+/* Scope: a folder created on one screen only ever shows on that screen.
+ * Notes='notes', Practice='practice', Classes='classes', Tests='tests'. */
+var notesBrowser = createBrowser({ crumb: 'notesCrumb', list: 'notesList', kind: 'note', create: 'notesCreate', scope: 'notes' });
+var practiceBrowser = createBrowser({ crumb: 'practiceCrumb', list: 'practiceList', kind: 'sheet', create: 'practiceCreate', scope: 'practice' });
+var classesBrowser = createBrowser({ crumb: 'classesCrumb', list: 'classesList', kind: 'video', create: 'classesCreate', scope: 'classes' });
+var testsBrowser = createBrowser({ crumb: 'testsCrumb', list: 'testsList', kind: null, create: 'testsCreate', scope: 'tests' });
 
 /* ================= Tests screen: AI test form + saved tests ================= */
 function refreshTestsScreen() {
