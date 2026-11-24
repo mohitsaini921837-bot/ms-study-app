@@ -1,0 +1,24 @@
+// build.gradle signing snippet — merge into app/android/app/build.gradle
+// (already merged in the live android/ project; this copy is the fallback
+// reference. See app/android-template/README.md for placement.)
+//
+// Inside android { ... }, before buildTypes:
+// signingConfigs {
+//     release {
+//         def ksFile = project.hasProperty('msstudy.keystore.file') ? project.property('msstudy.keystore.file') : null
+//         if (ksFile) {
+//             storeFile file(ksFile)
+//             storePassword project.hasProperty('msstudy.keystore.password') ? project.property('msstudy.keystore.password') : ''
+//             keyAlias project.hasProperty('msstudy.key.alias') ? project.property('msstudy.key.alias') : 'msstudy'
+//             keyPassword project.hasProperty('msstudy.key.password') ? project.property('msstudy.key.password') : ''
+//         }
+//     }
+// }
+//
+// And in buildTypes { release { ... } } add:
+// if (project.hasProperty('msstudy.keystore.file')) {
+//     signingConfig signingConfigs.release
+// }
+//
+// The keystore file itself is NEVER committed — the GitHub workflow
+// recreates it from the KEYSTORE_BASE64 repo secret at build time.

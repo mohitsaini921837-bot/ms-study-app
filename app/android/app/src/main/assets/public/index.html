@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light" />
+<link rel="icon" href="icon.png" />
+<title>MS Study</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ================= Header ================= -->
+<!-- Logo sits TOP-LEFT. Long-press it (3s) to open the hidden chat entry. -->
+<header class="app-header" id="appHeader">
+  <img class="app-logo" id="appLogo" src="icon.png" alt="MS Study logo" />
+  <div class="app-title-wrap">
+    <div class="app-title" id="appTitle">MS Study</div>
+    <div class="app-subtitle">Padhai, ek jagah</div>
+  </div>
+  <div class="header-spacer"></div>
+  <span class="active-chip" id="activeChip" hidden><span class="active-dot"></span>Active</span>
+  <button class="icon-btn" id="adminBtn" type="button" hidden title="Admin">Admin</button>
+</header>
+
+<main class="app-main" id="appMain">
+
+  <!-- ================= Password gate ================= -->
+  <section class="screen" id="screen-lock">
+    <div class="lock-wrap">
+      <img class="lock-logo" src="icon.png" alt="MS Study" />
+      <h1 class="lock-title">MS Study</h1>
+      <p class="lock-sub">Apna access password daalo</p>
+      <div class="card lock-card" id="lockCard">
+        <div class="error-box" id="lockError" hidden>
+          <div class="error-title" id="lockErrorTitle"></div>
+          <div class="error-text" id="lockErrorText"></div>
+        </div>
+        <label class="field-label" for="lockPassword">Access password</label>
+        <input class="field-input" id="lockPassword" type="password" placeholder="Password daalo"
+               autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button class="btn-primary" id="lockBtn" type="button">Login</button>
+      </div>
+      <div class="checking" id="lockChecking" hidden>
+        <div class="spinner"></div>
+        <div class="checking-title">Checking access…</div>
+        <div class="checking-text">Password verify ho raha hai, thoda wait karo.</div>
+      </div>
+      <p class="lock-foot">Password sirf is device par kaam karta hai. Kisi se share na karo.</p>
+    </div>
+  </section>
+
+  <!-- ================= Home ================= -->
+  <section class="screen" id="screen-home" hidden>
+    <div class="card welcome-card">
+      <h2 id="homeWelcome">Namaste 👋</h2>
+      <p class="muted">Aaj kya padhna hai? Neeche se section chuno.</p>
+    </div>
+    <div class="stats-row">
+      <div class="card stat-card"><div class="stat-num" id="statNotes">0</div><div class="stat-label">Notes</div></div>
+      <div class="card stat-card"><div class="stat-num" id="statTests">0</div><div class="stat-label">Tests</div></div>
+      <div class="card stat-card"><div class="stat-num" id="statClasses">0</div><div class="stat-label">Classes</div></div>
+    </div>
+    <div class="card info-card">
+      <h3>Phase 1 — Foundation</h3>
+      <p class="muted">Notes, Tests, Practice aur Classes Phase 2 se aayenge. Abhi sirf
+      password gate, admin aur update taiyaar hai.</p>
+    </div>
+  </section>
+
+  <!-- ================= Placeholder screens (Phase 2+) ================= -->
+  <section class="screen" id="screen-notes" hidden>
+    <div class="card empty-state">
+      <div class="empty-icon">📚</div>
+      <h2>Notes</h2>
+      <p class="muted">Notes — Phase 2 me aayega.</p>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-tests" hidden>
+    <div class="card empty-state">
+      <div class="empty-icon">📝</div>
+      <h2>Tests</h2>
+      <p class="muted">Tests — Phase 2 me aayega.</p>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-practice" hidden>
+    <div class="card empty-state">
+      <div class="empty-icon">✏️</div>
+      <h2>Practice</h2>
+      <p class="muted">Practice — Phase 2 me aayega.</p>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-classes" hidden>
+    <div class="card empty-state">
+      <div class="empty-icon">🎥</div>
+      <h2>Classes</h2>
+      <p class="muted">Classes — Phase 2 me aayega.</p>
+    </div>
+  </section>
+
+  <!-- ================= Admin (role === 'admin' only) ================= -->
+  <section class="screen" id="screen-admin" hidden>
+    <div class="section-head">
+      <h2>Admin</h2>
+      <button class="btn-ghost" id="adminBackBtn" type="button">← Back</button>
+    </div>
+
+    <div class="card">
+      <h3>Naya user password banao</h3>
+      <p class="muted">Ek naya code banega. Sirf EK baar dikhega — turant copy karke user ko bhejo.</p>
+      <button class="btn-primary" id="adminCreateBtn" type="button">Naya password banao</button>
+      <div class="code-card" id="adminCreateResult" hidden>
+        <div class="code-label">Naya password (sirf ek baar dikhega)</div>
+        <div class="code-value" id="adminNewCodeText"></div>
+        <button class="btn-secondary" id="adminCopyBtn" type="button">Copy karo</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>User passwords</h3>
+      <button class="btn-secondary" id="adminRefreshBtn" type="button">List refresh karo</button>
+      <div class="table-wrap">
+        <table class="admin-table">
+          <thead><tr><th>Role</th><th>Device</th><th>Label</th><th>Last used</th><th>Active</th><th></th></tr></thead>
+          <tbody id="adminPasswordsBody">
+            <tr><td colspan="6" class="muted">Abhi tak koi list load nahi hui.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Drive par note upload karo</h3>
+      <p class="muted">File server ke through Drive par jaati hai. App me kabhi Drive login nahi hota.</p>
+      <label class="field-label" for="adminUploadTitle">Title</label>
+      <input class="field-input" id="adminUploadTitle" type="text" placeholder="Note ka title" autocomplete="off" />
+      <label class="field-label" for="adminUploadFile">File chuno</label>
+      <input class="field-input file-input" id="adminUploadFile" type="file" />
+      <button class="btn-primary" id="adminUploadBtn" type="button">Upload karo</button>
+      <div class="upload-result" id="adminUploadResult" hidden>
+        <div class="success-text" id="adminUploadMsg"></div>
+        <label class="field-label" for="adminUploadLink">Direct link (copy karo)</label>
+        <input class="field-input" id="adminUploadLink" type="text" readonly />
+        <button class="btn-secondary" id="adminUploadCopyBtn" type="button">Link copy karo</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= Hidden chat — lock ================= -->
+  <section class="screen" id="screen-chat-lock" hidden>
+    <div class="lock-wrap">
+      <h2 id="chatLockTitle">Chat code daalo</h2>
+      <p class="muted" id="chatLockSub">Hidden chat kholne ke liye code daalo.</p>
+      <div class="card lock-card" id="chatLockCard">
+        <div class="error-box" id="chatLockError" hidden>
+          <div class="error-title">Galat code</div>
+          <div class="error-text">Code sahi nahi hai. Dobara try karo.</div>
+        </div>
+        <label class="field-label" for="chatCodeInput">Chat code</label>
+        <input class="field-input" id="chatCodeInput" type="password" placeholder="Code daalo"
+               autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <div id="chatCodeConfirmWrap" hidden>
+          <label class="field-label" for="chatCodeConfirm">Code dobara daalo (confirm)</label>
+          <input class="field-input" id="chatCodeConfirm" type="password" placeholder="Code confirm karo"
+                 autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </div>
+        <button class="btn-primary" id="chatLockBtn" type="button">Khol lo</button>
+      </div>
+      <button class="btn-ghost" id="chatLockBackBtn" type="button">← Wapas</button>
+    </div>
+  </section>
+
+  <!-- ================= Hidden chat — placeholder (real chat = Phase 5) ================= -->
+  <section class="screen" id="screen-chat" hidden>
+    <div class="card empty-state">
+      <div class="empty-icon">💬</div>
+      <h2>Chat</h2>
+      <p class="muted">Chat — Phase 5 me aayega.</p>
+      <button class="btn-secondary" id="chatBackBtn" type="button">Home wapas jao</button>
+    </div>
+  </section>
+
+</main>
+
+<!-- ================= Bottom nav (floating frosted glass) ================= -->
+<nav class="bottom-nav" id="bottomNav" hidden>
+  <button class="nav-btn active" id="navHome" type="button" data-screen="screen-home"><span class="nav-icon">🏠</span><span class="nav-label">Home</span></button>
+  <button class="nav-btn" id="navNotes" type="button" data-screen="screen-notes"><span class="nav-icon">📚</span><span class="nav-label">Notes</span></button>
+  <button class="nav-btn" id="navTests" type="button" data-screen="screen-tests"><span class="nav-icon">📝</span><span class="nav-label">Tests</span></button>
+  <button class="nav-btn" id="navPractice" type="button" data-screen="screen-practice"><span class="nav-icon">✏️</span><span class="nav-label">Practice</span></button>
+  <button class="nav-btn" id="navClasses" type="button" data-screen="screen-classes"><span class="nav-icon">🎥</span><span class="nav-label">Classes</span></button>
+</nav>
+
+<!-- ================= In-app update dialog ================= -->
+<div class="dialog-overlay" id="updateDialog" hidden>
+  <div class="card dialog-card">
+    <h2 id="updateTitle">Naya update aaya hai 🎉</h2>
+    <p class="muted" id="updateChangelog"></p>
+    <div class="dialog-actions">
+      <button class="btn-primary" id="updateBtn" type="button">Update karo</button>
+      <button class="btn-ghost" id="updateLaterBtn" type="button">Later</button>
+    </div>
+    <p class="muted small" id="updateStatus"></p>
+  </div>
+</div>
+
+<!-- ================= Toast ================= -->
+<div class="toast" id="toast" hidden></div>
+
+<script src="drive.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

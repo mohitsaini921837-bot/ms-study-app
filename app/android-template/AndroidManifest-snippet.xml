@@ -1,0 +1,18 @@
+<!-- AndroidManifest snippet — merge into app/android/app/src/main/AndroidManifest.xml.
+     (Already merged in the live android/ project; this copy is the fallback reference.
+     See app/android-template/README.md for placement.)
+
+     Inside <application> (keep the Capacitor-generated FileProvider if present):
+-->
+<!-- <provider
+    android:name="androidx.core.content.FileProvider"
+    android:authorities="${applicationId}.fileprovider"
+    android:exported="false"
+    android:grantUriPermissions="true">
+    <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/file_paths"></meta-data>
+</provider> -->
+
+<!-- Outside <application>, with the other permissions: -->
+<!-- <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" /> -->

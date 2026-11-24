@@ -1,0 +1,12 @@
+{
+	"appId": "com.kiara.msstudy",
+	"appName": "MS Study",
+	"webDir": "www",
+	"version": "1.0",
+	"android": {
+		"allowMixedContent": true
+	},
+	"server": {
+		"androidScheme": "https"
+	}
+}

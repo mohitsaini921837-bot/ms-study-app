@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MS Study</string>
+    <string name="title_activity_main">MS Study</string>
+    <string name="package_name">com.kiara.msstudy</string>
+    <string name="custom_url_scheme">com.kiara.msstudy</string>
+</resources>
