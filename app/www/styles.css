@@ -671,6 +671,64 @@ p { margin: 0 0 12px; line-height: 1.55; }
 .take-nav .btn-primary:disabled, .take-nav .btn-secondary:disabled { opacity: 0.45; }
 .take-submit { width: 100%; }
 #takeScore { font-size: 18px; font-weight: 800; margin: 4px 0 14px; }
+
+/* ---------- Result summary card (full result: score, time, correct/wrong/unattempted) ---------- */
+.take-summary {
+  border: 1px solid var(--glass-hi); background: var(--surface-glass);
+  border-radius: 18px; padding: 16px; margin-bottom: 14px;
+  backdrop-filter: blur(12px) saturate(1.3);
+  -webkit-backdrop-filter: blur(12px) saturate(1.3);
+  box-shadow: 0 6px 20px rgba(124, 92, 255, 0.12), 0 2px 8px rgba(20, 24, 31, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  transition: var(--morph);
+  transform: translateZ(0);
+}
+.take-summary-big { font-size: 22px; font-weight: 800; margin: 0 0 10px; }
+.take-summary-row { display: flex; justify-content: space-between; gap: 12px; font-size: 15px; font-weight: 600; padding: 5px 0; border-top: 1px solid rgba(20, 24, 31, 0.06); }
+.take-summary-row:first-of-type { border-top: 0; }
+.take-summary-when { font-size: 13px; color: var(--muted); font-weight: 600; margin: 10px 0 0; }
+.take-summary .take-correct { color: #15803d; }
+.take-summary .take-wrong { color: #b91c1c; }
+
+/* ---------- Question palette ---------- */
+.take-palette-btn { width: 100%; margin-bottom: 10px; }
+.take-palette-card { max-width: 440px; }
+.take-palette-grid {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+  margin-top: 12px; max-height: 46vh; overflow-y: auto;
+}
+.take-palette-num {
+  min-height: 48px; padding: 0; border-radius: 14px;
+  border: 1px solid var(--glass-hi); background: var(--surface-glass);
+  color: var(--ink); font-weight: 700; font-size: 16px;
+  backdrop-filter: blur(10px) saturate(1.3);
+  -webkit-backdrop-filter: blur(10px) saturate(1.3);
+  box-shadow: 0 3px 10px rgba(20, 24, 31, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  transition: var(--morph);
+  transform: translateZ(0);
+}
+.take-palette-num:active { transform: scale(1.06, 0.92); border-radius: 999px; }
+.take-palette-num.is-done {
+  background: var(--glass-grad); color: #fff; border-color: transparent;
+  box-shadow: 0 4px 14px rgba(124, 92, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.take-palette-num.is-current {
+  border: 2px solid #7c3aed; color: #6d28d9;
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.25), 0 4px 14px rgba(124, 92, 255, 0.25);
+}
+.take-palette-num.is-current.is-done { border-color: #fff; color: #fff; box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.45), 0 4px 14px rgba(124, 92, 255, 0.4); }
+
+/* ---------- Saved test card: previous-result badge ---------- */
+.test-card-badge {
+  align-self: flex-start;
+  font-size: 12px; font-weight: 800; color: #15803d;
+  background: rgba(22, 163, 74, 0.12);
+  padding: 4px 10px; border-radius: 999px;
+}
+
+/* ---------- Re-attempt / View Results dialog: stack the buttons ---------- */
+.take-choice-actions { flex-direction: column; }
+.take-choice-actions .btn-primary, .take-choice-actions .btn-secondary { width: 100%; }
+.take-choice-actions .btn-ghost { align-self: center; }
 .take-review-item {
   border: 1px solid var(--glass-hi); background: var(--surface-glass);
   border-radius: 14px; padding: 14px; margin-bottom: 10px;

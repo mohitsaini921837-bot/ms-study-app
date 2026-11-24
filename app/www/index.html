@@ -48,13 +48,6 @@
     </div>
   </section>
 
-  <!-- ================= Home ================= -->
-  <section class="screen" id="screen-home" hidden>
-    <div class="card welcome-card">
-      <h2 id="homeWelcome">Welcome</h2>
-    </div>
-  </section>
-
   <!-- ================= Notes ================= -->
   <section class="screen" id="screen-notes" hidden>
     <div class="section-head"><h2>Notes</h2></div>
@@ -120,6 +113,7 @@
     <p class="muted small" id="takeTimer"></p>
 
     <div id="takeBody">
+      <button class="btn-secondary take-palette-btn" id="takePaletteBtn" type="button">☰ All questions</button>
       <p class="muted small" id="takeProgress"></p>
       <p id="takeQuestion"></p>
       <div id="takeOptions"></div>
@@ -131,6 +125,7 @@
     </div>
 
     <div id="takeResult" hidden>
+      <div id="takeSummary"></div>
       <p id="takeScore"></p>
       <div id="takeReview"></div>
       <button class="btn-primary btn-glass-color" id="takeDoneBtn" type="button">Back to tests</button>
@@ -143,14 +138,6 @@
     <div class="crumb" id="practiceCrumb"></div>
     <div class="browser-create" id="practiceCreate" hidden></div>
     <div id="practiceList"></div>
-  </section>
-
-  <!-- ================= Classes ================= -->
-  <section class="screen" id="screen-classes" hidden>
-    <div class="section-head"><h2>Classes</h2></div>
-    <div class="crumb" id="classesCrumb"></div>
-    <div class="browser-create" id="classesCreate" hidden></div>
-    <div id="classesList"></div>
   </section>
 
   <!-- ================= Admin (role === 'admin' only) ================= -->
@@ -239,11 +226,9 @@
 
 <!-- ================= Bottom nav (floating frosted glass) ================= -->
 <nav class="bottom-nav" id="bottomNav" hidden>
-  <button class="nav-btn active" id="navHome" type="button" data-screen="screen-home"><span class="nav-icon">🏠</span><span class="nav-label">Home</span></button>
-  <button class="nav-btn" id="navNotes" type="button" data-screen="screen-notes"><span class="nav-icon">📚</span><span class="nav-label">Notes</span></button>
+  <button class="nav-btn active" id="navNotes" type="button" data-screen="screen-notes"><span class="nav-icon">📚</span><span class="nav-label">Notes</span></button>
   <button class="nav-btn" id="navTests" type="button" data-screen="screen-tests"><span class="nav-icon">📝</span><span class="nav-label">Tests</span></button>
   <button class="nav-btn" id="navPractice" type="button" data-screen="screen-practice"><span class="nav-icon">✏️</span><span class="nav-label">Practice</span></button>
-  <button class="nav-btn" id="navClasses" type="button" data-screen="screen-classes"><span class="nav-icon">🎥</span><span class="nav-label">Classes</span></button>
 </nav>
 
 <!-- ================= In-app update dialog ================= -->
@@ -265,6 +250,31 @@
     <button class="btn-secondary chat-menu-action" id="chatMsgReplyBtn" type="button">Reply</button>
     <button class="btn-secondary chat-menu-action chat-menu-danger" id="chatMsgDeleteBtn" type="button">Delete</button>
     <button class="btn-ghost" id="chatMsgMenuCancel" type="button">Cancel</button>
+  </div>
+</div>
+
+<!-- ================= Question palette (during a test) ================= -->
+<div class="dialog-overlay" id="takePalette" hidden>
+  <div class="card dialog-card take-palette-card">
+    <h3>Questions</h3>
+    <p class="muted small" id="takePaletteSummary"></p>
+    <div class="take-palette-grid" id="takePaletteGrid"></div>
+    <div class="dialog-actions">
+      <button class="btn-ghost" id="takePaletteCloseBtn" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= Re-attempt / View Results (saved test) ================= -->
+<div class="dialog-overlay" id="testChoiceDialog" hidden>
+  <div class="card dialog-card">
+    <h3 id="testChoiceTitle"></h3>
+    <p class="muted small" id="testChoiceMeta"></p>
+    <div class="dialog-actions take-choice-actions">
+      <button class="btn-primary btn-glass-color" id="testReattemptBtn" type="button">Re-attempt</button>
+      <button class="btn-secondary" id="testViewResultBtn" type="button">View Results</button>
+      <button class="btn-ghost" id="testChoiceCancelBtn" type="button">Cancel</button>
+    </div>
   </div>
 </div>
 

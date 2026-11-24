@@ -101,7 +101,7 @@ async function getDeviceInfo() {
 }
 
 /* ================= Screens / router ================= */
-var MAIN_SCREENS = ['screen-home', 'screen-notes', 'screen-tests', 'screen-practice', 'screen-classes', 'screen-admin'];
+var MAIN_SCREENS = ['screen-notes', 'screen-tests', 'screen-practice', 'screen-admin'];
 var ALL_SCREENS = MAIN_SCREENS.concat(['screen-lock', 'screen-chat-lock', 'screen-chat', 'screen-take']);
 
 function showScreen(id) {
@@ -119,7 +119,6 @@ function showScreen(id) {
   // Lazy-load the screen's data when it is shown.
   if (id === 'screen-notes') { notesBrowser.load(); }
   else if (id === 'screen-practice') { practiceBrowser.load(); }
-  else if (id === 'screen-classes') { classesBrowser.load(); }
   else if (id === 'screen-tests') { refreshTestsScreen(); }
 }
 
@@ -218,7 +217,7 @@ function enterApp() {
   $('lockPassword').value = '';
   $('activeChip').hidden = false;
   $('adminBtn').hidden = (window.MsStudySession.role !== 'admin');
-  showScreen('screen-home');
+  showScreen('screen-notes');
   startRevalidation();
   checkForUpdate();
 }
@@ -329,8 +328,8 @@ async function apiCall(path, extra) {
  * (breadcrumb to go back), sections expand to show their items,
  * items open their Drive link on tap.
  * Admin only, inside a folder: "New folder" / "New section" create row.
- * Admin only, inside an open section: Note / Practice sheet / Class
- * video upload cards — all three kinds, on every browser screen. */
+ * Admin only, inside an open section: Note / Practice sheet upload
+ * cards — both kinds, on every browser screen. */
 function createBrowser(opts) {
   var state = { folderId: null, path: [], foldersById: {}, expanded: {} };
 
@@ -418,7 +417,7 @@ function createBrowser(opts) {
    * admin only. data-section carries the section id for the upload. */
   function uploadCardsHtml(sectionId) {
     if (window.MsStudySession.role !== 'admin') { return ''; }
-    var kinds = [['note', 'Note'], ['sheet', 'Practice sheet'], ['video', 'Class video']];
+    var kinds = [['note', 'Note'], ['sheet', 'Practice sheet']];
     var html = '<div class="section-uploads">';
     kinds.forEach(function (k) {
       html += '<div class="upload-card" data-section="' + esc(sectionId) + '">' +
@@ -634,10 +633,9 @@ function createBrowser(opts) {
 }
 
 /* Scope: a folder created on one screen only ever shows on that screen.
- * Notes='notes', Practice='practice', Classes='classes', Tests='tests'. */
+ * Notes='notes', Practice='practice', Tests='tests'. (Classes was removed.) */
 var notesBrowser = createBrowser({ crumb: 'notesCrumb', list: 'notesList', kind: 'note', create: 'notesCreate', scope: 'notes' });
 var practiceBrowser = createBrowser({ crumb: 'practiceCrumb', list: 'practiceList', kind: 'sheet', create: 'practiceCreate', scope: 'practice' });
-var classesBrowser = createBrowser({ crumb: 'classesCrumb', list: 'classesList', kind: 'video', create: 'classesCreate', scope: 'classes' });
 var testsBrowser = createBrowser({ crumb: 'testsCrumb', list: 'testsList', kind: null, create: 'testsCreate', scope: 'tests' });
 
 /* ================= Tests screen: AI test form + saved tests ================= */
@@ -646,6 +644,11 @@ function refreshTestsScreen() {
   testsBrowser.load();
   refreshSavedTests();
 }
+
+/* The current user's latest attempt per test id (from /tests/last-attempt).
+ * Attempts are per-device, so this map only ever holds THIS user's results. */
+var savedAttempts = {};
+var lastAttemptChecked = {};
 
 async function refreshSavedTests() {
   var list = $('savedTestsList');
@@ -668,15 +671,89 @@ async function refreshSavedTests() {
         '<span class="test-card-meta">' + esc(meta) + '</span></button>';
     });
     list.innerHTML = html;
+    // Per test, ask the server for THIS user's latest attempt (never anyone
+    // else's — the server filters by the caller's deviceId). Cards with a
+    // previous attempt get a badge and offer Re-attempt / View Results.
+    savedAttempts = {};
+    tests.forEach(function (t) {
+      apiCall('/tests/last-attempt', { testId: t.id }).then(function (d) {
+        lastAttemptChecked[t.id] = true;
+        if (d && d.attempt) {
+          savedAttempts[t.id] = d.attempt;
+          var card = list.querySelector('[data-test="' + t.id + '"]');
+          if (card) {
+            card.setAttribute('data-has-attempt', '1');
+            var badge = document.createElement('span');
+            badge.className = 'test-card-badge';
+            badge.textContent = '✓ Previous result';
+            card.appendChild(badge);
+          }
+        }
+      }).catch(function () { lastAttemptChecked[t.id] = true; /* no attempt (or offline) — card stays a plain Start */ });
+    });
   } catch (e) {
     list.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
   }
 }
 
+/* Tapping a test: if THIS user has a previous attempt, offer Re-attempt /
+ * View Results; otherwise start the test directly as before. */
+var testChoice = null;
+
+function closeTestChoice() {
+  $('testChoiceDialog').hidden = true;
+  testChoice = null;
+}
+
+function showTestChoice(testId, attempt, title) {
+  testChoice = { testId: testId, attempt: attempt, title: title || 'Test' };
+  $('testChoiceTitle').textContent = testChoice.title;
+  $('testChoiceMeta').textContent = 'You have attempted this test before.';
+  $('testChoiceDialog').hidden = false;
+}
+
 $('savedTestsList').addEventListener('click', function (ev) {
   var b = ev.target.closest('[data-test]');
   if (!b) { return; }
-  openTest(b.getAttribute('data-test'));
+  var testId = b.getAttribute('data-test');
+  var title = b.getAttribute('data-title') || 'Test';
+  var attempt = savedAttempts[testId];
+  if (attempt) { showTestChoice(testId, attempt, title); return; }
+  if (lastAttemptChecked[testId]) { openTest(testId); return; }
+  // The background last-attempt check has not finished yet: check live now
+  // so a fast tap still offers View Results instead of wrongly starting over.
+  $('testDetail').textContent = 'Loading…';
+  apiCall('/tests/last-attempt', { testId: testId }).then(function (d) {
+    lastAttemptChecked[testId] = true;
+    $('testDetail').textContent = '';
+    if (d && d.attempt) {
+      savedAttempts[testId] = d.attempt;
+      showTestChoice(testId, d.attempt, title);
+    } else {
+      openTest(testId);
+    }
+  }).catch(function (e) {
+    $('testDetail').textContent = e.message || 'Try again.';
+  });
+});
+
+$('testReattemptBtn').addEventListener('click', function () {
+  if (!testChoice) { return; }
+  var testId = testChoice.testId;
+  closeTestChoice();
+  openTest(testId);
+});
+
+$('testViewResultBtn').addEventListener('click', function () {
+  if (!testChoice) { return; }
+  var c = testChoice;
+  closeTestChoice();
+  viewSavedResult(c.testId, c.attempt);
+});
+
+$('testChoiceCancelBtn').addEventListener('click', closeTestChoice);
+$('testChoiceDialog').addEventListener('click', function (ev) {
+  if (ev.target === $('testChoiceDialog')) { closeTestChoice(); }
 });
 
 $('testType').addEventListener('change', function () {
@@ -771,6 +848,10 @@ function takeRenderQuestion() {
   $('takePrevBtn').disabled = (st.idx === 0);
   var last = (st.idx === st.questions.length - 1);
   $('takeNextBtn').textContent = last ? 'Submit' : 'Next';
+  // Palette stays live: if it is open, refresh it as the current question
+  // and the answered counts change.
+  var pal = $('takePalette');
+  if (pal && !pal.hidden) { takeRenderPalette(); }
 }
 
 async function openTest(testId) {
@@ -788,7 +869,8 @@ async function openTest(testId) {
       answers: questions.map(function () { return -1; }),
       remainingSec: Math.max(1, (parseInt(test.duration_min, 10) || 10) * 60),
       timer: null,
-      submitted: false
+      submitted: false,
+      startedAt: Date.now()
     };
     $('takeTitle').textContent = test.title || 'Test';
     $('takeBody').hidden = false;
@@ -827,20 +909,26 @@ function sleep(ms) {
   return new Promise(function (resolve) { setTimeout(resolve, ms); });
 }
 
-async function submitTakeResult(score, total) {
+async function submitTakeResult(score, total, detail) {
   // POST /tests/submit with up to 3 attempts (~800ms between them).
   // Body is exactly what handleTestsSubmit expects: password + deviceId
-  // (from the live session) plus testId/score/total/answers.
+  // (from the live session) plus testId/score/total/answers and the full
+  // result detail (time taken, correct, wrong, unattempted).
   // Never blocks the result screen: the score and review are already
   // shown before this is called; only the status line changes.
   if (!takeState) { return; }
   var statusEl = takeSaveStatusEl();
   statusEl.textContent = 'Saving result…';
+  var d = detail || {};
   var payload = {
     testId: takeState.test.id,
     score: score,
     total: total,
-    answers: takeState.answers.slice()
+    answers: takeState.answers.slice(),
+    time_taken_sec: (typeof d.timeTakenSec === 'number') ? d.timeTakenSec : 0,
+    correct_count: (typeof d.correct === 'number') ? d.correct : 0,
+    wrong_count: (typeof d.wrong === 'number') ? d.wrong : 0,
+    unattempted_count: (typeof d.unattempted === 'number') ? d.unattempted : 0
   };
   var saved = false;
   for (var attempt = 1; attempt <= 3 && !saved; attempt++) {
@@ -868,33 +956,129 @@ async function submitTakeResult(score, total) {
   statusEl.textContent = saved ? 'Result saved.' : 'Could not save result.';
 }
 
-function submitTake() {
-  var st = takeState;
-  if (!st || st.submitted) { return; }
-  st.submitted = true;
-  stopTakeTimer();
+/* Full result summary card: score, time taken, correct, wrong, unattempted.
+ * `detail` = { score, total, timeTakenSec, correct, wrong, unattempted,
+ * when (optional finished_at string shown as "Attempted on …") }. */
+function takeSummaryHtml(detail) {
+  var d = detail || {};
+  var score = (typeof d.score === 'number') ? d.score : 0;
+  var total = (typeof d.total === 'number') ? d.total : 0;
+  var timeSec = (typeof d.timeTakenSec === 'number') ? d.timeTakenSec : 0;
+  var correct = (typeof d.correct === 'number') ? d.correct : 0;
+  var wrong = (typeof d.wrong === 'number') ? d.wrong : 0;
+  var unattempted = (typeof d.unattempted === 'number') ? d.unattempted : 0;
+  var html = '<div class="take-summary">' +
+    '<p class="take-summary-big">Score: ' + score + ' / ' + total + '</p>' +
+    '<div class="take-summary-row"><span>Time taken</span><span>' + esc(takeFormatTime(Math.max(0, timeSec))) + '</span></div>' +
+    '<div class="take-summary-row"><span class="take-correct">Correct</span><span class="take-correct">' + correct + '</span></div>' +
+    '<div class="take-summary-row"><span class="take-wrong">Wrong</span><span class="take-wrong">' + wrong + '</span></div>' +
+    '<div class="take-summary-row"><span>Unattempted</span><span>' + unattempted + '</span></div>' +
+    (d.when ? '<p class="take-summary-when">Attempted on ' + esc(d.when) + '</p>' : '') +
+    '</div>';
+  return html;
+}
+
+/* Question-by-question review from a questions list + an answers array
+ * (answers[i] = chosen option index, -1 = not answered). Shared by the
+ * fresh result and the saved-result view. */
+function takeReviewHtml(questions, answers) {
   var letters = ['A', 'B', 'C', 'D'];
-  var score = 0;
   var html = '';
-  st.questions.forEach(function (q, i) {
-    var chosen = st.answers[i];
+  (questions || []).forEach(function (q, i) {
+    var chosen = (answers && typeof answers[i] === 'number') ? answers[i] : -1;
     var correct = (typeof q.answer_index === 'number') ? q.answer_index : -1;
     var ok = (chosen !== -1 && chosen === correct);
-    if (ok) { score += 1; }
     html += '<div class="take-review-item">' +
       '<p class="take-review-q">' + esc((i + 1) + '. ' + (q.question || '')) + '</p>' +
       '<p class="take-review-line ' + (ok ? 'take-correct' : 'take-wrong') + '">' +
-      (ok ? '✓ Correct' : '✗ Wrong') + '</p>' +
+      (ok ? '✓ Correct' : (chosen === -1 ? '– Not attempted' : '✗ Wrong')) + '</p>' +
       '<p class="take-review-line">Your answer: ' + esc(chosen === -1 ? 'Not answered' : (letters[chosen] + '. ' + ((q.options || [])[chosen] || ''))) + '</p>' +
       '<p class="take-review-line">Correct answer: ' + esc(correct === -1 ? '—' : (letters[correct] + '. ' + ((q.options || [])[correct] || ''))) + '</p>' +
       (q.explanation ? '<p class="take-review-line take-explain">' + esc(q.explanation) + '</p>' : '') +
       '</div>';
   });
+  return html;
+}
+
+/* Counts from questions + answers (fallback when the server row has no
+ * stored counts, e.g. an attempt saved before the detail columns existed). */
+function takeCountsFromAnswers(questions, answers) {
+  var correct = 0, wrong = 0, unattempted = 0;
+  (questions || []).forEach(function (q, i) {
+    var chosen = (answers && typeof answers[i] === 'number') ? answers[i] : -1;
+    if (chosen === -1) { unattempted += 1; return; }
+    if (chosen === q.answer_index) { correct += 1; } else { wrong += 1; }
+  });
+  return { correct: correct, wrong: wrong, unattempted: unattempted };
+}
+
+function submitTake() {
+  var st = takeState;
+  if (!st || st.submitted) { return; }
+  st.submitted = true;
+  stopTakeTimer();
+  var counts = takeCountsFromAnswers(st.questions, st.answers);
+  var score = counts.correct;
+  var timeTakenSec = st.startedAt ? Math.max(0, Math.round((Date.now() - st.startedAt) / 1000)) : 0;
+  var detail = {
+    score: score,
+    total: st.questions.length,
+    timeTakenSec: timeTakenSec,
+    correct: counts.correct,
+    wrong: counts.wrong,
+    unattempted: counts.unattempted
+  };
+  $('takeSummary').innerHTML = takeSummaryHtml(detail);
   $('takeScore').textContent = 'You scored ' + score + ' out of ' + st.questions.length + '.';
-  $('takeReview').innerHTML = html;
+  $('takeReview').innerHTML = takeReviewHtml(st.questions, st.answers);
   $('takeBody').hidden = true;
   $('takeResult').hidden = false;
-  submitTakeResult(score, st.questions.length);
+  submitTakeResult(score, st.questions.length, detail);
+}
+
+/* Read-only view of a SAVED attempt (from View Results): same full summary
+ * + question-by-question review, rebuilt from the saved answers. */
+async function viewSavedResult(testId, attempt) {
+  $('testDetail').textContent = 'Loading…';
+  try {
+    var data = await apiCall('/tests/questions', { testId: testId });
+    var questions = (data && data.questions) || [];
+    var test = (data && data.test) || {};
+    if (!questions.length) { $('testDetail').textContent = 'Try again.'; return; }
+    var answers = (attempt && Array.isArray(attempt.answers)) ? attempt.answers : [];
+    var counts = takeCountsFromAnswers(questions, answers);
+    var score = (typeof attempt.score === 'number') ? attempt.score : counts.correct;
+    var total = (typeof attempt.total === 'number') ? attempt.total : questions.length;
+    var when = '';
+    if (attempt.finished_at) {
+      var dt = new Date(attempt.finished_at);
+      if (!isNaN(dt.getTime())) { when = dt.toLocaleString(); }
+    }
+    var detail = {
+      score: score,
+      total: total,
+      timeTakenSec: (typeof attempt.time_taken_sec === 'number') ? attempt.time_taken_sec : 0,
+      correct: (typeof attempt.correct_count === 'number') ? attempt.correct_count : counts.correct,
+      wrong: (typeof attempt.wrong_count === 'number') ? attempt.wrong_count : counts.wrong,
+      unattempted: (typeof attempt.unattempted_count === 'number') ? attempt.unattempted_count : counts.unattempted,
+      when: when
+    };
+    stopTakeTimer();
+    takeState = null;
+    $('takeTitle').textContent = test.title || 'Test';
+    $('takeTimer').textContent = '';
+    $('takeSummary').innerHTML = takeSummaryHtml(detail);
+    $('takeScore').textContent = 'You scored ' + score + ' out of ' + total + '.';
+    $('takeReview').innerHTML = takeReviewHtml(questions, answers);
+    var prevStatus = $('takeSaveStatus');
+    if (prevStatus) { prevStatus.textContent = ''; }
+    $('testDetail').textContent = '';
+    $('takeBody').hidden = true;
+    $('takeResult').hidden = false;
+    showScreen('screen-take');
+  } catch (e) {
+    $('testDetail').textContent = e.message || 'Try again.';
+  }
 }
 
 $('takeOptions').addEventListener('click', function (ev) {
@@ -919,6 +1103,53 @@ $('takeNextBtn').addEventListener('click', function () {
 
 $('takeSubmitBtn').addEventListener('click', function () {
   submitTake();
+});
+
+/* ================= Question palette ================= */
+/* Grid of numbered buttons: current question = highlighted, answered =
+ * filled gradient, unattempted = plain glass. Tapping a number jumps
+ * straight to that question. Re-rendered every time it opens (and while
+ * open, from takeRenderQuestion), so it is always live. */
+function takeRenderPalette() {
+  var st = takeState;
+  var grid = $('takePaletteGrid');
+  if (!grid || !st) { return; }
+  var answered = 0;
+  var html = '';
+  st.questions.forEach(function (q, i) {
+    var done = (st.answers[i] !== -1);
+    if (done) { answered += 1; }
+    var cls = 'take-palette-num' +
+      (i === st.idx ? ' is-current' : '') +
+      (done ? ' is-done' : '');
+    html += '<button type="button" class="' + cls + '" data-jump="' + i + '">' + (i + 1) + '</button>';
+  });
+  grid.innerHTML = html;
+  var remaining = st.questions.length - answered;
+  $('takePaletteSummary').textContent = answered + ' of ' + st.questions.length + ' answered · ' + remaining + ' remaining';
+}
+
+function openTakePalette() {
+  if (!takeState || takeState.submitted) { return; }
+  takeRenderPalette();
+  $('takePalette').hidden = false;
+}
+
+function closeTakePalette() {
+  $('takePalette').hidden = true;
+}
+
+$('takePaletteBtn').addEventListener('click', openTakePalette);
+$('takePaletteCloseBtn').addEventListener('click', closeTakePalette);
+$('takePalette').addEventListener('click', function (ev) {
+  if (ev.target === $('takePalette')) { closeTakePalette(); }
+});
+$('takePaletteGrid').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-jump]');
+  if (!b || !takeState || takeState.submitted) { return; }
+  takeState.idx = parseInt(b.getAttribute('data-jump'), 10) || 0;
+  takeRenderQuestion();
+  closeTakePalette();
 });
 
 $('takeBackBtn').addEventListener('click', function () {
@@ -967,7 +1198,7 @@ $('adminBtn').addEventListener('click', function () {
   if (window.MsStudySession.role !== 'admin') { return; }
   showScreen('screen-admin');
 });
-$('adminBackBtn').addEventListener('click', function () { showScreen('screen-home'); });
+$('adminBackBtn').addEventListener('click', function () { showScreen('screen-notes'); });
 
 $('adminCreateBtn').addEventListener('click', async function () {
   var btn = $('adminCreateBtn');
@@ -1166,7 +1397,7 @@ $('chatLockBtn').addEventListener('click', async function () {
 $('chatCodeInput').addEventListener('keydown', function (ev) {
   if (ev.key === 'Enter') { $('chatLockBtn').click(); }
 });
-$('chatLockBackBtn').addEventListener('click', function () { showScreen('screen-home'); });
+$('chatLockBackBtn').addEventListener('click', function () { showScreen('screen-notes'); });
 
 /* ================= Hidden chat ================= */
 /* Text chat only. Polls /chat/messages every 2s while open, and fetches
@@ -1524,7 +1755,7 @@ $('chatInput').addEventListener('keydown', function (ev) {
 $('chatReplyCancel').addEventListener('click', hideReplyBar);
 $('chatBackBtn').addEventListener('click', function () {
   stopChat();
-  showScreen('screen-home');
+  showScreen('screen-notes');
 });
 
 /* Long-press a message: Reply / Delete menu (touch + mouse). */
