@@ -1,6 +1,5 @@
-/* MS Study — Phase 1 app shell (Capacitor 6, single-page app).
+/* MS Study — app shell (Capacitor 6, single-page app).
  *
- * Mirrors the PW app's Capacitor pattern (pw-apk/app):
  *   - Native MsAccess plugin (android/.../MsAccessPlugin.java) does the
  *     /validate POST and holds the encrypted session, exactly like
  *     PW's PwAccessPlugin + PwSessionStore (AES-256/GCM key in the
@@ -29,11 +28,8 @@
 
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
-/* ^^^ PLANNED Render URL — UPDATE THIS once the real Render service is
- * live if its URL differs. The app will not log in until this points
- * at the real MS Study server. */
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 3;
+var CURRENT_VERSION_CODE = 4;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -74,6 +70,12 @@ function uuid() {
     '-' + h(8) + h(9) + '-' + h(10) + h(11) + h(12) + h(13) + h(14) + h(15);
 }
 
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
 /* Device identity: native plugin first (UUID generated once, stored
  * AES-encrypted — mirrors PW's PwSessionStore fallback-id mechanism).
  * Browser fallback only: a UUID in localStorage. */
@@ -112,6 +114,12 @@ function showScreen(id) {
     btn.classList.toggle('active', btn.getAttribute('data-screen') === id);
   });
   window.scrollTo(0, 0);
+  // Lazy-load the screen's data when it is shown.
+  if (id === 'screen-notes') { notesBrowser.load(); }
+  else if (id === 'screen-practice') { practiceBrowser.load(); }
+  else if (id === 'screen-classes') { classesBrowser.load(); }
+  else if (id === 'screen-tests') { refreshTestsScreen(); }
+  else if (id === 'screen-admin') { loadAdminFolder(); }
 }
 
 document.querySelectorAll('.nav-btn').forEach(function (btn) {
@@ -123,11 +131,11 @@ document.querySelectorAll('.nav-btn').forEach(function (btn) {
 
 /* ================= Password gate ================= */
 var GATE_MSGS = {
-  incorrect: ['Incorrect password', 'This password is not recognized. Please check and try again.'],
-  kicked: ['Signed in on another device', 'This password is now signed in on another device.'],
-  unavailable: ['Unable to connect', 'Please check your connection and try again.'],
-  rate_limited: ['Please wait', 'Too many attempts. Please try again shortly.'],
-  empty: ['Enter your password', 'Please enter your access password.']
+  incorrect: ['Incorrect password', 'Check and try again.'],
+  kicked: ['Signed in on another device', 'Sign in again to continue.'],
+  unavailable: ['Unable to connect', 'Check your connection and try again.'],
+  rate_limited: ['Please wait', 'Try again shortly.'],
+  empty: ['Enter your password', '']
 };
 
 function showLockError(key) {
@@ -187,7 +195,7 @@ async function submitLogin() {
       enterApp();
     } else if (r.result === 'kicked') {
       showLockChecking(false);
-      showToast('This password is now signed in on another device.');
+      showToast('Signed in on another device.');
       showLockError('kicked');
     } else if (r.result && GATE_MSGS[r.result]) {
       showLockChecking(false);
@@ -225,7 +233,7 @@ function lockout(reason) {
   showScreen('screen-lock');
   showLockChecking(false);
   if (reason === 'kicked') {
-    showToast('This password is now signed in on another device.');
+    showToast('Signed in on another device.');
     showLockError('kicked');
   } else if (reason === 'incorrect') {
     showLockError('incorrect');
@@ -233,6 +241,8 @@ function lockout(reason) {
     showLockError(null);
   }
 }
+/* drive.js calls this on an auth failure from a Drive request. */
+window.MsStudyLockout = lockout;
 
 /* Silent revalidation every 15s + on resume, with the in-memory password.
  * "kicked"/"incorrect" locks immediately; "unavailable"/"rate_limited"
@@ -281,6 +291,243 @@ document.addEventListener('visibilitychange', function () {
   }
 })();
 
+/* ================= API helper ================= */
+/* POST JSON to the server with the in-memory session. On an auth
+ * failure the user goes back to the lock screen (lockout). Other
+ * failures surface as one short line: "Not allowed." / "Try again." */
+async function apiCall(path, extra) {
+  var body = { password: window.MsStudySession.password, deviceId: window.MsStudySession.deviceId };
+  Object.keys(extra || {}).forEach(function (k) { body[k] = extra[k]; });
+  var res = await fetch(SERVER_URL + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  var data = await res.json().catch(function () { return {}; });
+  if (data && data.result === 'incorrect') { lockout('incorrect'); throw new Error('Try again.'); }
+  if (data && data.result === 'kicked') { lockout('kicked'); throw new Error('Try again.'); }
+  if (data && data.result === 'unauthorized') { throw new Error('Not allowed.'); }
+  if (data && data.result === 'unavailable') { throw new Error('Try again.'); }
+  if (!res.ok) { throw new Error('Try again.'); }
+  return data;
+}
+
+/* ================= Folder browser (Notes / Tests / Practice / Classes) ================= */
+/* Each browser keeps its own folder + path. Folders open on tap
+ * (breadcrumb to go back), sections expand to show their items,
+ * items open their Drive link on tap. */
+function createBrowser(opts) {
+  var state = { folderId: null, path: [], foldersById: {}, expanded: {} };
+
+  function renderCrumb() {
+    var c = $(opts.crumb);
+    if (!c) { return; }
+    var html = '<button type="button" class="crumb-btn" data-crumb="">All</button>';
+    state.path.forEach(function (p, i) {
+      html += '<span class="crumb-sep">/</span><button type="button" class="crumb-btn" data-crumb="' + i + '">' + esc(p.name) + '</button>';
+    });
+    c.innerHTML = html;
+  }
+
+  function openFolder(id, name) {
+    state.folderId = id;
+    state.path.push({ id: id, name: name });
+    state.expanded = {};
+    load();
+  }
+
+  function goCrumb(idx) {
+    if (idx === '' || idx == null) {
+      state.folderId = null;
+      state.path = [];
+    } else {
+      var i = parseInt(idx, 10);
+      state.path = state.path.slice(0, i + 1);
+      state.folderId = state.path[state.path.length - 1].id;
+    }
+    state.expanded = {};
+    load();
+  }
+
+  async function toggleSection(sectionId, box) {
+    if (!box.hidden) { box.hidden = true; return; }
+    box.innerHTML = '<p class="muted">Loading…</p>';
+    box.hidden = false;
+    try {
+      var data = await apiCall('/items/list', { folderId: state.folderId, sectionId: sectionId });
+      var items = (data && data.items) || [];
+      if (opts.kind) { items = items.filter(function (it) { return it.kind === opts.kind; }); }
+      if (items.length === 0) { box.innerHTML = '<p class="muted">Empty.</p>'; return; }
+      var html = '';
+      items.forEach(function (it) {
+        html += '<button type="button" class="row-item" data-link="' + esc(it.drive_link || '') + '">' +
+          esc(it.title || '') + '</button>';
+      });
+      box.innerHTML = html;
+    } catch (e) {
+      box.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
+    }
+  }
+
+  async function load() {
+    var list = $(opts.list);
+    if (!list) { return; }
+    renderCrumb();
+    list.innerHTML = '<p class="muted">Loading…</p>';
+    try {
+      var fdata = await apiCall('/folders/list', { parentId: state.folderId });
+      var folders = (fdata && fdata.folders) || [];
+      var sdata = await apiCall('/sections/list', { folderId: state.folderId });
+      var sections = (sdata && sdata.sections) || [];
+      var idata = await apiCall('/items/list', { folderId: state.folderId, sectionId: null });
+      var items = (idata && idata.items) || [];
+      if (opts.kind) { items = items.filter(function (it) { return it.kind === opts.kind; }); }
+      state.foldersById = {};
+      folders.forEach(function (f) { state.foldersById[f.id] = f.name; });
+      var html = '';
+      folders.forEach(function (f) {
+        html += '<button type="button" class="row-item" data-folder="' + esc(f.id) + '">📁 ' + esc(f.name) + '</button>';
+      });
+      sections.forEach(function (s) {
+        html += '<button type="button" class="row-item" data-section="' + esc(s.id) + '">▸ ' + esc(s.name) + '</button>';
+        html += '<div class="section-items" id="' + opts.list + '-sec-' + esc(s.id) + '" hidden></div>';
+      });
+      items.forEach(function (it) {
+        html += '<button type="button" class="row-item" data-link="' + esc(it.drive_link || '') + '">' +
+          esc(it.title || '') + '</button>';
+      });
+      if (!html) { html = '<p class="muted">Empty.</p>'; }
+      list.innerHTML = html;
+    } catch (e) {
+      list.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
+    }
+  }
+
+  function bind() {
+    var crumb = $(opts.crumb);
+    if (crumb) {
+      crumb.addEventListener('click', function (ev) {
+        var b = ev.target.closest('[data-crumb]');
+        if (!b) { return; }
+        goCrumb(b.getAttribute('data-crumb'));
+      });
+    }
+    var list = $(opts.list);
+    if (list) {
+      list.addEventListener('click', function (ev) {
+        var f = ev.target.closest('[data-folder]');
+        if (f) { openFolder(f.getAttribute('data-folder'), state.foldersById[f.getAttribute('data-folder')] || ''); return; }
+        var s = ev.target.closest('[data-section]');
+        if (s) {
+          var box = $(opts.list + '-sec-' + s.getAttribute('data-section'));
+          if (box) { toggleSection(s.getAttribute('data-section'), box); }
+          return;
+        }
+        var l = ev.target.closest('[data-link]');
+        if (l) {
+          var link = l.getAttribute('data-link');
+          if (link) { window.open(link, '_blank'); }
+        }
+      });
+    }
+  }
+
+  bind();
+  return { load: load };
+}
+
+var notesBrowser = createBrowser({ crumb: 'notesCrumb', list: 'notesList', kind: 'note' });
+var practiceBrowser = createBrowser({ crumb: 'practiceCrumb', list: 'practiceList', kind: 'sheet' });
+var classesBrowser = createBrowser({ crumb: 'classesCrumb', list: 'classesList', kind: 'video' });
+var testsBrowser = createBrowser({ crumb: 'testsCrumb', list: 'testsList', kind: null });
+
+/* ================= Tests screen: AI test form + saved tests ================= */
+function refreshTestsScreen() {
+  $('aiTestForm').hidden = (window.MsStudySession.role !== 'admin');
+  testsBrowser.load();
+  refreshSavedTests();
+}
+
+async function refreshSavedTests() {
+  var list = $('savedTestsList');
+  if (!list) { return; }
+  list.innerHTML = '<p class="muted">Loading…</p>';
+  $('testDetail').textContent = '';
+  try {
+    var data = await apiCall('/tests/list', {});
+    var tests = (data && data.tests) || [];
+    if (tests.length === 0) { list.innerHTML = '<p class="muted">No tests.</p>'; return; }
+    var html = '';
+    tests.forEach(function (t) {
+      html += '<button type="button" class="row-item" data-test="' + esc(t.id) + '" data-title="' + esc(t.title || '') +
+        '" data-q="' + (t.question_count || '') + '" data-m="' + (t.duration_min || '') + '">' +
+        esc(t.title || '') + ' · ' + esc(t.question_count || '') + ' questions · ' + esc(t.duration_min || '') + ' min</button>';
+    });
+    list.innerHTML = html;
+  } catch (e) {
+    list.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
+  }
+}
+
+$('savedTestsList').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-test]');
+  if (!b) { return; }
+  $('testDetail').textContent = b.getAttribute('data-title') + ' — ' +
+    b.getAttribute('data-q') + ' questions · ' + b.getAttribute('data-m') + ' min';
+});
+
+$('testType').addEventListener('change', function () {
+  $('testSheetWrap').hidden = ($('testType').value !== 'sheet');
+});
+
+$('testQuestions').addEventListener('input', function () {
+  var n = parseInt($('testQuestions').value, 10);
+  if (isFinite(n)) { $('testMinutes').value = Math.max(10, Math.min(50, n)); }
+});
+
+function clampQuestions(v) {
+  var n = parseInt(v, 10);
+  if (!isFinite(n)) { n = 10; }
+  n = Math.round(n / 5) * 5;
+  return Math.max(10, Math.min(50, n));
+}
+
+function clampMinutes(v) {
+  var n = parseInt(v, 10);
+  if (!isFinite(n)) { n = 10; }
+  return Math.max(10, Math.min(50, n));
+}
+
+$('testGenerateBtn').addEventListener('click', async function () {
+  var topic = ($('testTopic').value || '').trim();
+  if (!topic) { $('testGenStatus').textContent = 'Enter a topic.'; return; }
+  var btn = $('testGenerateBtn');
+  btn.disabled = true;
+  $('testGenStatus').textContent = 'Generating…';
+  try {
+    var type = $('testType').value;
+    var data = await apiCall('/tests/generate', {
+      type: type,
+      topic: topic,
+      subject: ($('testSubject').value || '').trim(),
+      numQuestions: clampQuestions($('testQuestions').value),
+      minutes: clampMinutes($('testMinutes').value),
+      language: $('testLang').value,
+      sheetText: (type === 'sheet') ? ($('testSheetText').value || '') : ''
+    });
+    if (data && data.result === 'ok') {
+      $('testGenStatus').textContent = 'Test ready.';
+      refreshSavedTests();
+    } else {
+      $('testGenStatus').textContent = 'Try again.';
+    }
+  } catch (e) {
+    $('testGenStatus').textContent = e.message || 'Try again.';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 /* ================= Admin ================= */
 function adminHeaders() {
   return { 'Content-Type': 'application/json', 'Accept': 'application/json' };
@@ -302,7 +549,13 @@ async function adminPost(path, extra) {
     body: JSON.stringify(adminBody(extra))
   });
   var data = await res.json().catch(function () { return {}; });
-  if (!res.ok) { throw new Error((data && (data.error || data.message)) || ('Server error ' + res.status)); }
+  if (data && (data.result === 'incorrect' || data.result === 'kicked')) {
+    lockout(data.result);
+    throw new Error('Try again.');
+  }
+  if (data && data.result === 'unauthorized') { throw new Error('Not allowed.'); }
+  if (data && data.result === 'unavailable') { throw new Error('Try again.'); }
+  if (!res.ok) { throw new Error((data && (data.error || data.message)) || 'Try again.'); }
   return data;
 }
 
@@ -318,12 +571,12 @@ $('adminCreateBtn').addEventListener('click', async function () {
   try {
     var data = await adminPost('/admin/create-password', {});
     var code = data.code || data.password || '';
-    if (!code) { throw new Error('The server did not return a code.'); }
+    if (!code) { throw new Error('Try again.'); }
     $('adminNewCodeText').textContent = code;
     $('adminCreateResult').hidden = false;
-    showToast('New password created — copy it now.');
+    showToast('Password created.');
   } catch (e) {
-    showToast('Could not create password: ' + e.message);
+    showToast('Could not create password.');
   } finally {
     btn.disabled = false;
   }
@@ -333,14 +586,8 @@ $('adminCopyBtn').addEventListener('click', async function () {
   try {
     await navigator.clipboard.writeText($('adminNewCodeText').textContent);
     showToast('Copied.');
-  } catch (e) { showToast('Could not copy — please note the code down.'); }
+  } catch (e) { showToast('Could not copy.'); }
 });
-
-function esc(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
-    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-  });
-}
 
 $('adminRefreshBtn').addEventListener('click', async function () {
   var btn = $('adminRefreshBtn');
@@ -349,7 +596,7 @@ $('adminRefreshBtn').addEventListener('click', async function () {
     var data = await adminPost('/admin/passwords', {});
     var rows = data.passwords || data.items || data || [];
     if (!Array.isArray(rows) || rows.length === 0) {
-      $('adminPasswordsBody').innerHTML = '<tr><td colspan="6" class="muted">No passwords found.</td></tr>';
+      $('adminPasswordsBody').innerHTML = '<tr><td colspan="6" class="muted">No passwords.</td></tr>';
       return;
     }
     // Batched render: one innerHTML write for the whole table.
@@ -365,7 +612,7 @@ $('adminRefreshBtn').addEventListener('click', async function () {
     });
     $('adminPasswordsBody').innerHTML = html;
   } catch (e) {
-    showToast('Could not load the list: ' + e.message);
+    showToast('Could not load the list.');
   } finally {
     btn.disabled = false;
   }
@@ -382,38 +629,175 @@ $('adminPasswordsBody').addEventListener('click', async function (ev) {
     showToast('Password deactivated.');
     $('adminRefreshBtn').click();
   } catch (e) {
-    showToast('Could not deactivate: ' + e.message);
+    showToast('Could not deactivate.');
     btn.disabled = false;
   }
 });
 
-/* Drive upload (admin only) — via drive.js, server-side Drive. */
-$('adminUploadBtn').addEventListener('click', async function () {
-  var file = $('adminUploadFile').files && $('adminUploadFile').files[0];
-  var title = ($('adminUploadTitle').value || '').trim();
-  if (!file) { showToast('Please choose a file first.'); return; }
-  var btn = $('adminUploadBtn');
-  btn.disabled = true;
-  $('adminUploadResult').hidden = true;
+/* ---------- Admin folders / sections / uploads ---------- */
+/* Folder inside folder: the "New folder" row creates a folder inside
+ * the CURRENT folder (top level when the path is "All"). */
+var adminFolderId = null;
+var adminPath = [];       // [{id, name}]
+var adminSections = [];  // sections of the current folder
+var adminFoldersById = {};
+
+function renderAdminCrumb() {
+  var html = '<button type="button" class="crumb-btn" data-crumb="">All</button>';
+  adminPath.forEach(function (p, i) {
+    html += '<span class="crumb-sep">/</span><button type="button" class="crumb-btn" data-crumb="' + i + '">' + esc(p.name) + '</button>';
+  });
+  $('adminCrumb').innerHTML = html;
+}
+
+function renderAdminSections() {
+  var list = $('adminSectionList');
+  if (adminSections.length === 0) {
+    list.innerHTML = '<p class="muted">No sections.</p>';
+  } else {
+    var html = '';
+    adminSections.forEach(function (s) {
+      html += '<div class="row-item row-static">' + esc(s.name) + '</div>';
+    });
+    list.innerHTML = html;
+  }
+  // Refresh the section pickers on the three upload cards.
+  ['upNoteSection', 'upSheetSection', 'upVideoSection'].forEach(function (id) {
+    var sel = $(id);
+    if (!sel) { return; }
+    var prev = sel.value;
+    var html = '<option value="">No section</option>';
+    adminSections.forEach(function (s) {
+      html += '<option value="' + esc(s.id) + '">' + esc(s.name) + '</option>';
+    });
+    sel.innerHTML = html;
+    if (prev) { sel.value = prev; }
+  });
+}
+
+async function loadAdminFolder() {
+  renderAdminCrumb();
+  $('adminFolderList').innerHTML = '<p class="muted">Loading…</p>';
+  $('adminSectionList').innerHTML = '<p class="muted">Loading…</p>';
+  $('adminFolderStatus').textContent = '';
+  $('adminSectionStatus').textContent = '';
   try {
-    var data = await window.MsDrive.upload(file, title, 'note');
-    var link = data.directLink || data.url || data.link || '';
-    $('adminUploadMsg').textContent = 'Upload complete.';
-    $('adminUploadLink').value = link;
-    $('adminUploadResult').hidden = false;
-    showToast('Upload complete.');
+    var fdata = await apiCall('/folders/list', { parentId: adminFolderId });
+    var folders = (fdata && fdata.folders) || [];
+    adminFoldersById = {};
+    folders.forEach(function (f) { adminFoldersById[f.id] = f.name; });
+    if (folders.length === 0) {
+      $('adminFolderList').innerHTML = '<p class="muted">No folders.</p>';
+    } else {
+      var html = '';
+      folders.forEach(function (f) {
+        html += '<button type="button" class="row-item" data-folder="' + esc(f.id) + '">📁 ' + esc(f.name) + '</button>';
+      });
+      $('adminFolderList').innerHTML = html;
+    }
+    var sdata = await apiCall('/sections/list', { folderId: adminFolderId });
+    adminSections = (sdata && sdata.sections) || [];
+    renderAdminSections();
   } catch (e) {
-    showToast('Upload failed: ' + e.message);
+    $('adminFolderList').innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
+    $('adminSectionList').innerHTML = '';
+    adminSections = [];
+    renderAdminSections();
+  }
+}
+
+$('adminCrumb').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-crumb]');
+  if (!b) { return; }
+  var idx = b.getAttribute('data-crumb');
+  if (idx === '' || idx == null) {
+    adminFolderId = null;
+    adminPath = [];
+  } else {
+    var i = parseInt(idx, 10);
+    adminPath = adminPath.slice(0, i + 1);
+    adminFolderId = adminPath[adminPath.length - 1].id;
+  }
+  loadAdminFolder();
+});
+
+$('adminFolderList').addEventListener('click', function (ev) {
+  var f = ev.target.closest('[data-folder]');
+  if (!f) { return; }
+  var id = f.getAttribute('data-folder');
+  adminFolderId = id;
+  adminPath.push({ id: id, name: adminFoldersById[id] || '' });
+  loadAdminFolder();
+});
+
+$('adminNewFolderBtn').addEventListener('click', async function () {
+  var name = ($('adminNewFolderName').value || '').trim();
+  if (!name) { $('adminFolderStatus').textContent = 'Enter a name.'; return; }
+  var btn = $('adminNewFolderBtn');
+  btn.disabled = true;
+  $('adminFolderStatus').textContent = 'Creating…';
+  try {
+    await apiCall('/folders/create', { name: name, parentId: adminFolderId });
+    $('adminNewFolderName').value = '';
+    $('adminFolderStatus').textContent = 'Folder created.';
+    loadAdminFolder();
+  } catch (e) {
+    $('adminFolderStatus').textContent = e.message || 'Try again.';
   } finally {
     btn.disabled = false;
   }
 });
 
-$('adminUploadCopyBtn').addEventListener('click', async function () {
+$('adminNewSectionBtn').addEventListener('click', async function () {
+  if (!adminFolderId) { $('adminSectionStatus').textContent = 'Open a folder first.'; return; }
+  var name = ($('adminNewSectionName').value || '').trim();
+  if (!name) { $('adminSectionStatus').textContent = 'Enter a name.'; return; }
+  var btn = $('adminNewSectionBtn');
+  btn.disabled = true;
+  $('adminSectionStatus').textContent = 'Creating…';
   try {
-    await navigator.clipboard.writeText($('adminUploadLink').value);
-    showToast('Link copied.');
-  } catch (e) { showToast('Could not copy.'); }
+    await apiCall('/sections/create', { name: name, folderId: adminFolderId });
+    $('adminNewSectionName').value = '';
+    $('adminSectionStatus').textContent = 'Section created.';
+    var sdata = await apiCall('/sections/list', { folderId: adminFolderId });
+    adminSections = (sdata && sdata.sections) || [];
+    renderAdminSections();
+  } catch (e) {
+    $('adminSectionStatus').textContent = e.message || 'Try again.';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+/* One upload card: title + file + section picker -> current folder. */
+async function handleUpload(kind, titleId, fileId, sectionId, statusId, btnId) {
+  var file = $(fileId).files && $(fileId).files[0];
+  var title = ($(titleId).value || '').trim();
+  if (!file) { $(statusId).textContent = 'Choose a file.'; return; }
+  var section = $(sectionId).value || null;
+  var btn = $(btnId);
+  btn.disabled = true;
+  $(statusId).textContent = 'Uploading…';
+  try {
+    await window.MsDrive.upload(file, title, kind, adminFolderId, section);
+    $(statusId).textContent = 'Uploaded.';
+    $(fileId).value = '';
+    $(titleId).value = '';
+  } catch (e) {
+    $(statusId).textContent = e.message || 'Try again.';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('upNoteBtn').addEventListener('click', function () {
+  handleUpload('note', 'upNoteTitle', 'upNoteFile', 'upNoteSection', 'upNoteStatus', 'upNoteBtn');
+});
+$('upSheetBtn').addEventListener('click', function () {
+  handleUpload('sheet', 'upSheetTitle', 'upSheetFile', 'upSheetSection', 'upSheetStatus', 'upSheetBtn');
+});
+$('upVideoBtn').addEventListener('click', function () {
+  handleUpload('video', 'upVideoTitle', 'upVideoFile', 'upVideoSection', 'upVideoStatus', 'upVideoBtn');
 });
 
 /* ================= Hidden chat entry (lock only — real chat = Phase 5) ================= */
@@ -429,12 +813,10 @@ function openChatLock() {
   $('chatCodeConfirm').value = '';
   if (hasCode) {
     $('chatLockTitle').textContent = 'Enter chat code';
-    $('chatLockSub').textContent = 'Enter the code to open the hidden chat.';
     $('chatCodeConfirmWrap').hidden = true;
     $('chatLockBtn').textContent = 'Open chat';
   } else {
     $('chatLockTitle').textContent = 'Set a chat code';
-    $('chatLockSub').textContent = 'Set a code for the first time. The same code is used on both sides.';
     $('chatCodeConfirmWrap').hidden = false;
     $('chatLockBtn').textContent = 'Set code';
   }
@@ -526,10 +908,10 @@ $('updateBtn').addEventListener('click', async function () {
     var installer = capPlugin('ApkInstaller');
     var fs = capPlugin('Filesystem');
     if (!installer || !installer.installApk || !fs) {
-      throw new Error('The installer is not available in this version.');
+      throw new Error('Installer unavailable.');
     }
     var res = await fetch(pendingUpdate.apkUrl);
-    if (!res.ok) { throw new Error('Could not download the update (' + res.status + ')'); }
+    if (!res.ok) { throw new Error('Download failed.'); }
     var buf = await res.arrayBuffer();
     var bytes = new Uint8Array(buf);
     var binary = '';
@@ -549,7 +931,7 @@ $('updateBtn').addEventListener('click', async function () {
     await installer.installApk({ fileName: fileName });
     $('updateDialog').hidden = true;
   } catch (e) {
-    $('updateStatus').textContent = 'Update failed: ' + e.message;
+    $('updateStatus').textContent = 'Update failed.';
   } finally {
     btn.disabled = false;
   }

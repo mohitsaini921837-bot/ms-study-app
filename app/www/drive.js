@@ -1,16 +1,16 @@
-/* MS Study — Drive client (Phase 1).
+/* MS Study — Drive client.
  *
  * NO Google Sign-In in the app. NO Drive API key / JSON / service-account
  * credential in any client file. Every Drive operation goes through the
  * MS Study server (SERVER_URL), which holds the service-account key
  * server-side only. The app only ever sends {password, deviceId} plus
- * the file/title/kind the admin chose.
+ * the file/title/kind/folder/section the admin chose.
  *
  * Endpoints (server contract, same auth shape as /validate):
  *   POST {SERVER_URL}/drive/list   {password, deviceId, folderId?}
  *   POST {SERVER_URL}/drive/upload multipart FormData
- *        {password, deviceId, file, title, kind}
- *        -> {ok: true, directLink: "https://..."} (or {error: "..."})
+ *        {password, deviceId, file, title, kind, folderId?, sectionId?}
+ *        kind: "note" | "sheet" | "video"
  *
  * This file only defines window.MsDrive; app.js owns SERVER_URL and
  * the in-memory password. Nothing here stores a password. */
@@ -33,6 +33,20 @@
     };
   }
 
+  /* Normalize a server result code into a short error. "incorrect" /
+   * "kicked" send the user back to the lock screen (app.js exposes
+   * window.MsStudyLockout for this). Returns an Error or null. */
+  function resultError(data) {
+    if (!data || typeof data.result !== 'string') { return null; }
+    if (data.result === 'incorrect' || data.result === 'kicked') {
+      if (window.MsStudyLockout) { window.MsStudyLockout(data.result); }
+      return new Error('Try again.');
+    }
+    if (data.result === 'unauthorized') { return new Error('Not allowed.'); }
+    if (data.result === 'unavailable') { return new Error('Try again.'); }
+    return null;
+  }
+
   async function postJson(path, body) {
     var res = await fetch(serverUrl() + path, {
       method: 'POST',
@@ -40,8 +54,10 @@
       body: JSON.stringify(body)
     });
     var data = await res.json().catch(function () { return {}; });
+    var err = resultError(data);
+    if (err) { throw err; }
     if (!res.ok) {
-      throw new Error((data && (data.error || data.message)) || ('Server error ' + res.status));
+      throw new Error((data && (data.error || data.message)) || 'Try again.');
     }
     return data;
   }
@@ -54,9 +70,10 @@
     return postJson('/drive/list', body);
   }
 
-  /* Upload one file. kind: "note" | "sheet" | "video" (Phase 1: "note").
+  /* Upload one file. kind: "note" | "sheet" | "video".
+   * folderId / sectionId optional (null = top level / no section).
    * Returns the server response, which includes the direct link. */
-  async function driveUpload(file, title, kind) {
+  async function driveUpload(file, title, kind, folderId, sectionId) {
     if (!file) { throw new Error('No file selected.'); }
     var auth = authHeaders();
     var form = new FormData();
@@ -65,10 +82,14 @@
     form.append('file', file);
     form.append('title', title || file.name);
     form.append('kind', kind || 'note');
+    if (folderId) { form.append('folderId', folderId); }
+    if (sectionId) { form.append('sectionId', sectionId); }
     var res = await fetch(serverUrl() + '/drive/upload', { method: 'POST', body: form });
     var data = await res.json().catch(function () { return {}; });
+    var err = resultError(data);
+    if (err) { throw err; }
     if (!res.ok) {
-      throw new Error((data && (data.error || data.message)) || ('Upload failed ' + res.status));
+      throw new Error((data && (data.error || data.message)) || 'Try again.');
     }
     return data;
   }

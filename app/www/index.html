@@ -16,7 +16,6 @@
   <img class="app-logo" id="appLogo" src="icon.png" alt="MS Study logo" />
   <div class="app-title-wrap">
     <div class="app-title" id="appTitle">MS Study</div>
-    <div class="app-subtitle">Study, all in one place</div>
   </div>
   <div class="header-spacer"></div>
   <span class="active-chip" id="activeChip" hidden><span class="active-dot"></span>Active</span>
@@ -44,9 +43,8 @@
       <div class="checking" id="lockChecking" hidden>
         <div class="spinner"></div>
         <div class="checking-title">Verifying…</div>
-        <div class="checking-text">Verifying your password. Please wait.</div>
       </div>
-      <p class="lock-foot">Your password works only on this device. Do not share it.</p>
+      <p class="lock-foot">Works only on this device.</p>
     </div>
   </section>
 
@@ -54,50 +52,75 @@
   <section class="screen" id="screen-home" hidden>
     <div class="card welcome-card">
       <h2 id="homeWelcome">Welcome</h2>
-      <p class="muted">What would you like to study today? Choose a section below.</p>
-    </div>
-    <div class="stats-row">
-      <div class="card stat-card"><div class="stat-num" id="statNotes">0</div><div class="stat-label">Notes</div></div>
-      <div class="card stat-card"><div class="stat-num" id="statTests">0</div><div class="stat-label">Tests</div></div>
-      <div class="card stat-card"><div class="stat-num" id="statClasses">0</div><div class="stat-label">Classes</div></div>
-    </div>
-    <div class="card info-card">
-      <h3>Phase 1 — Foundation</h3>
-      <p class="muted">Notes, Tests, Practice and Classes arrive in Phase 2. For now, sign-in, admin and updates are ready.</p>
     </div>
   </section>
 
-  <!-- ================= Placeholder screens (Phase 2+) ================= -->
+  <!-- ================= Notes ================= -->
   <section class="screen" id="screen-notes" hidden>
-    <div class="card empty-state">
-      <div class="empty-icon">📚</div>
-      <h2>Notes</h2>
-      <p class="muted">Notes arrive in Phase 2.</p>
-    </div>
+    <div class="section-head"><h2>Notes</h2></div>
+    <div class="crumb" id="notesCrumb"></div>
+    <div id="notesList"></div>
   </section>
 
+  <!-- ================= Tests ================= -->
   <section class="screen" id="screen-tests" hidden>
-    <div class="card empty-state">
-      <div class="empty-icon">📝</div>
-      <h2>Tests</h2>
-      <p class="muted">Tests arrive in Phase 2.</p>
+    <div class="section-head"><h2>Tests</h2></div>
+
+    <div class="card" id="aiTestForm" hidden>
+      <h3>New test</h3>
+      <label class="field-label" for="testType">Type</label>
+      <select class="field-input" id="testType">
+        <option value="notes">From notes</option>
+        <option value="pyq">PYQ</option>
+        <option value="mixed">Mixed</option>
+        <option value="sheet">From sheet</option>
+      </select>
+      <label class="field-label" for="testTopic">Topic</label>
+      <input class="field-input" id="testTopic" type="text" placeholder="Topic" autocomplete="off" />
+      <label class="field-label" for="testSubject">Subject</label>
+      <input class="field-input" id="testSubject" type="text" placeholder="Subject (optional)" autocomplete="off" />
+      <label class="field-label" for="testQuestions">Questions</label>
+      <input class="field-input" id="testQuestions" type="number" min="10" max="50" step="5" value="10" />
+      <label class="field-label" for="testMinutes">Time (minutes)</label>
+      <input class="field-input" id="testMinutes" type="number" min="10" max="50" value="10" />
+      <label class="field-label" for="testLang">Language</label>
+      <select class="field-input" id="testLang">
+        <option value="hi">Hindi</option>
+        <option value="en">English</option>
+      </select>
+      <div id="testSheetWrap" hidden>
+        <label class="field-label" for="testSheetText">Sheet text</label>
+        <textarea class="field-input field-textarea" id="testSheetText" rows="4" placeholder="Paste the sheet text"></textarea>
+      </div>
+      <button class="btn-primary" id="testGenerateBtn" type="button">Generate test</button>
+      <p class="muted small" id="testGenStatus"></p>
+    </div>
+
+    <div class="card">
+      <h3>Saved tests</h3>
+      <div id="savedTestsList"></div>
+      <p class="muted small" id="testDetail"></p>
+    </div>
+
+    <div class="card">
+      <h3>Folders</h3>
+      <div class="crumb" id="testsCrumb"></div>
+      <div id="testsList"></div>
     </div>
   </section>
 
+  <!-- ================= Practice ================= -->
   <section class="screen" id="screen-practice" hidden>
-    <div class="card empty-state">
-      <div class="empty-icon">✏️</div>
-      <h2>Practice</h2>
-      <p class="muted">Practice arrives in Phase 2.</p>
-    </div>
+    <div class="section-head"><h2>Practice</h2></div>
+    <div class="crumb" id="practiceCrumb"></div>
+    <div id="practiceList"></div>
   </section>
 
+  <!-- ================= Classes ================= -->
   <section class="screen" id="screen-classes" hidden>
-    <div class="card empty-state">
-      <div class="empty-icon">🎥</div>
-      <h2>Classes</h2>
-      <p class="muted">Classes arrive in Phase 2.</p>
-    </div>
+    <div class="section-head"><h2>Classes</h2></div>
+    <div class="crumb" id="classesCrumb"></div>
+    <div id="classesList"></div>
   </section>
 
   <!-- ================= Admin (role === 'admin' only) ================= -->
@@ -108,43 +131,83 @@
     </div>
 
     <div class="card">
-      <h3>Create a user password</h3>
-      <p class="muted">A new code will be generated. It is shown only once — copy it and send it to the user right away.</p>
+      <h3>Create password</h3>
       <button class="btn-primary" id="adminCreateBtn" type="button">Create password</button>
       <div class="code-card" id="adminCreateResult" hidden>
-        <div class="code-label">New password (shown only once)</div>
+        <div class="code-label">New password</div>
         <div class="code-value" id="adminNewCodeText"></div>
         <button class="btn-secondary" id="adminCopyBtn" type="button">Copy</button>
       </div>
     </div>
 
     <div class="card">
-      <h3>User passwords</h3>
-      <button class="btn-secondary" id="adminRefreshBtn" type="button">Refresh list</button>
+      <h3>Passwords</h3>
+      <button class="btn-secondary" id="adminRefreshBtn" type="button">Refresh</button>
       <div class="table-wrap">
         <table class="admin-table">
           <thead><tr><th>Role</th><th>Device</th><th>Label</th><th>Last used</th><th>Active</th><th></th></tr></thead>
           <tbody id="adminPasswordsBody">
-            <tr><td colspan="6" class="muted">No list loaded yet.</td></tr>
+            <tr><td colspan="6" class="muted">No passwords.</td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
     <div class="card">
-      <h3>Upload a note to Drive</h3>
-      <p class="muted">The file is uploaded to Drive through the server. You never sign in to Drive in the app.</p>
-      <label class="field-label" for="adminUploadTitle">Title</label>
-      <input class="field-input" id="adminUploadTitle" type="text" placeholder="Note title" autocomplete="off" />
-      <label class="field-label" for="adminUploadFile">Choose a file</label>
-      <input class="field-input file-input" id="adminUploadFile" type="file" />
-      <button class="btn-primary" id="adminUploadBtn" type="button">Upload</button>
-      <div class="upload-result" id="adminUploadResult" hidden>
-        <div class="success-text" id="adminUploadMsg"></div>
-        <label class="field-label" for="adminUploadLink">Direct link (copy it)</label>
-        <input class="field-input" id="adminUploadLink" type="text" readonly />
-        <button class="btn-secondary" id="adminUploadCopyBtn" type="button">Copy link</button>
+      <h3>Folders</h3>
+      <div class="crumb" id="adminCrumb"></div>
+      <div id="adminFolderList"></div>
+      <div class="row-form">
+        <input class="field-input" id="adminNewFolderName" type="text" placeholder="Folder name" autocomplete="off" />
+        <button class="btn-secondary" id="adminNewFolderBtn" type="button">Add folder</button>
       </div>
+      <p class="muted small" id="adminFolderStatus"></p>
+    </div>
+
+    <div class="card">
+      <h3>Sections</h3>
+      <div id="adminSectionList"></div>
+      <div class="row-form">
+        <input class="field-input" id="adminNewSectionName" type="text" placeholder="Section name" autocomplete="off" />
+        <button class="btn-secondary" id="adminNewSectionBtn" type="button">Add section</button>
+      </div>
+      <p class="muted small" id="adminSectionStatus"></p>
+    </div>
+
+    <div class="card">
+      <h3>Upload note</h3>
+      <label class="field-label" for="upNoteTitle">Title</label>
+      <input class="field-input" id="upNoteTitle" type="text" placeholder="Title" autocomplete="off" />
+      <label class="field-label" for="upNoteSection">Section</label>
+      <select class="field-input" id="upNoteSection"><option value="">No section</option></select>
+      <label class="field-label" for="upNoteFile">File</label>
+      <input class="field-input file-input" id="upNoteFile" type="file" />
+      <button class="btn-primary" id="upNoteBtn" type="button">Upload</button>
+      <p class="muted small" id="upNoteStatus"></p>
+    </div>
+
+    <div class="card">
+      <h3>Upload practice sheet</h3>
+      <label class="field-label" for="upSheetTitle">Title</label>
+      <input class="field-input" id="upSheetTitle" type="text" placeholder="Title" autocomplete="off" />
+      <label class="field-label" for="upSheetSection">Section</label>
+      <select class="field-input" id="upSheetSection"><option value="">No section</option></select>
+      <label class="field-label" for="upSheetFile">File</label>
+      <input class="field-input file-input" id="upSheetFile" type="file" />
+      <button class="btn-primary" id="upSheetBtn" type="button">Upload</button>
+      <p class="muted small" id="upSheetStatus"></p>
+    </div>
+
+    <div class="card">
+      <h3>Upload class video</h3>
+      <label class="field-label" for="upVideoTitle">Title</label>
+      <input class="field-input" id="upVideoTitle" type="text" placeholder="Title" autocomplete="off" />
+      <label class="field-label" for="upVideoSection">Section</label>
+      <select class="field-input" id="upVideoSection"><option value="">No section</option></select>
+      <label class="field-label" for="upVideoFile">File</label>
+      <input class="field-input file-input" id="upVideoFile" type="file" />
+      <button class="btn-primary" id="upVideoBtn" type="button">Upload</button>
+      <p class="muted small" id="upVideoStatus"></p>
     </div>
   </section>
 
@@ -152,17 +215,15 @@
   <section class="screen" id="screen-chat-lock" hidden>
     <div class="lock-wrap">
       <h2 id="chatLockTitle">Enter chat code</h2>
-      <p class="muted" id="chatLockSub">Enter the code to open the hidden chat.</p>
       <div class="card lock-card" id="chatLockCard">
         <div class="error-box" id="chatLockError" hidden>
           <div class="error-title">Incorrect code</div>
-          <div class="error-text">The code is incorrect. Please try again.</div>
         </div>
         <label class="field-label" for="chatCodeInput">Chat code</label>
         <input class="field-input" id="chatCodeInput" type="password" placeholder="Enter code"
                autocomplete="off" autocapitalize="off" spellcheck="false" />
         <div id="chatCodeConfirmWrap" hidden>
-          <label class="field-label" for="chatCodeConfirm">Enter the code again (confirm)</label>
+          <label class="field-label" for="chatCodeConfirm">Confirm code</label>
           <input class="field-input" id="chatCodeConfirm" type="password" placeholder="Confirm code"
                  autocomplete="off" autocapitalize="off" spellcheck="false" />
         </div>
@@ -177,7 +238,6 @@
     <div class="card empty-state">
       <div class="empty-icon">💬</div>
       <h2>Chat</h2>
-      <p class="muted">Chat arrives in Phase 5.</p>
       <button class="btn-secondary" id="chatBackBtn" type="button">Back to Home</button>
     </div>
   </section>

@@ -39,7 +39,7 @@ body {
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
 }
-button, input { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button { min-height: 44px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 button:active { transform: scale(0.97); transition: transform 120ms var(--spring); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
@@ -73,10 +73,13 @@ p { margin: 0 0 12px; line-height: 1.55; }
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
+  /* The logo art is very light frosted glass — invisible on the light UI
+   * without a solid tile behind it. */
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  padding: 5px;
 }
 .app-title-wrap { line-height: 1.15; min-width: 0; }
 .app-title { font-size: 20px; font-weight: 800; letter-spacing: 0.3px; }
-.app-subtitle { font-size: 12px; color: var(--muted); }
 .header-spacer { flex: 1; }
 .active-chip {
   display: inline-flex;
@@ -152,6 +155,7 @@ p { margin: 0 0 12px; line-height: 1.55; }
   margin-bottom: 14px;
 }
 .field-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.field-textarea { height: auto; min-height: 110px; padding: 12px 14px; resize: vertical; }
 .file-input { padding: 12px 14px; height: auto; }
 
 .btn-primary, .btn-secondary, .btn-ghost {
@@ -172,7 +176,7 @@ p { margin: 0 0 12px; line-height: 1.55; }
 
 /* ---------- Lock screens ---------- */
 .lock-wrap { max-width: 420px; margin: 24px auto 0; text-align: center; }
-.lock-logo { width: 96px; height: 96px; border-radius: 28px; object-fit: cover; margin-bottom: 14px; box-shadow: 0 10px 30px rgba(20, 24, 31, 0.14); }
+.lock-logo { width: 96px; height: 96px; border-radius: 28px; object-fit: cover; margin-bottom: 14px; box-shadow: 0 10px 30px rgba(20, 24, 31, 0.14); background: linear-gradient(135deg, #2563eb, #1d4ed8); padding: 10px; }
 .lock-title { font-size: 30px; font-weight: 800; }
 .lock-sub { color: var(--muted); margin-bottom: 24px; }
 .lock-card { text-align: left; }
@@ -196,7 +200,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .checking-title { font-size: 19px; font-weight: 800; }
-.checking-text { color: var(--muted); margin-top: 8px; }
 .shake { animation: shake 320ms var(--ease); }
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
@@ -227,6 +230,27 @@ p { margin: 0 0 12px; line-height: 1.55; }
 }
 .upload-result { margin-top: 14px; }
 .success-text { color: var(--green); font-weight: 700; margin-bottom: 12px; }
+
+/* ---------- Folder browser / rows ---------- */
+.crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-bottom: 12px; }
+.crumb-btn {
+  border: 0; background: transparent; color: var(--accent);
+  font-weight: 700; font-size: 14px; min-height: 32px; padding: 4px 6px;
+}
+.crumb-sep { color: var(--muted); font-size: 14px; }
+.row-item {
+  display: block; width: 100%; text-align: left;
+  border: 1px solid var(--border); background: var(--surface-solid);
+  border-radius: 14px; padding: 13px 14px; margin-bottom: 8px;
+  font-weight: 600; font-size: 15px; color: var(--ink);
+}
+.row-item:active { transform: scale(0.98); }
+.row-static { cursor: default; }
+.row-static:active { transform: none; }
+.row-form { display: flex; gap: 8px; margin-top: 12px; }
+.row-form .field-input { flex: 1; margin-bottom: 0; }
+.row-form .btn-secondary { flex: 0 0 auto; white-space: nowrap; }
+.section-items { margin: 0 0 8px; padding-left: 12px; }
 
 /* ---------- Bottom nav (floating frosted glass) ---------- */
 .bottom-nav {
