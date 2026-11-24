@@ -38,7 +38,7 @@
         <label class="field-label" for="lockPassword">Access password</label>
         <input class="field-input" id="lockPassword" type="password" placeholder="Enter password"
                autocomplete="off" autocapitalize="off" spellcheck="false" />
-        <button class="btn-primary" id="lockBtn" type="button">Sign In</button>
+        <button class="btn-primary btn-glass-color" id="lockBtn" type="button">Sign In</button>
       </div>
       <div class="checking" id="lockChecking" hidden>
         <div class="spinner"></div>
@@ -93,7 +93,7 @@
         <label class="field-label" for="testSheetText">Sheet text</label>
         <textarea class="field-input field-textarea" id="testSheetText" rows="4" placeholder="Paste the sheet text"></textarea>
       </div>
-      <button class="btn-primary" id="testGenerateBtn" type="button">Generate test</button>
+      <button class="btn-primary btn-glass-color" id="testGenerateBtn" type="button">Generate test</button>
       <p class="muted small" id="testGenStatus"></p>
     </div>
 
@@ -125,15 +125,15 @@
       <div id="takeOptions"></div>
       <div class="take-nav">
         <button class="btn-secondary" id="takePrevBtn" type="button">Previous</button>
-        <button class="btn-primary" id="takeNextBtn" type="button">Next</button>
+        <button class="btn-primary btn-glass-color" id="takeNextBtn" type="button">Next</button>
       </div>
-      <button class="btn-secondary take-submit" id="takeSubmitBtn" type="button">Submit</button>
+      <button class="btn-primary take-submit btn-glass-color" id="takeSubmitBtn" type="button">Submit</button>
     </div>
 
     <div id="takeResult" hidden>
       <p id="takeScore"></p>
       <div id="takeReview"></div>
-      <button class="btn-primary" id="takeDoneBtn" type="button">Back to tests</button>
+      <button class="btn-primary btn-glass-color" id="takeDoneBtn" type="button">Back to tests</button>
     </div>
   </section>
 
@@ -162,7 +162,7 @@
 
     <div class="card">
       <h3>Create password</h3>
-      <button class="btn-primary" id="adminCreateBtn" type="button">Create password</button>
+      <button class="btn-primary btn-glass-color" id="adminCreateBtn" type="button">Create password</button>
       <div class="code-card" id="adminCreateResult" hidden>
         <div class="code-label">New password</div>
         <div class="code-value" id="adminNewCodeText"></div>
@@ -200,7 +200,7 @@
           <input class="field-input" id="chatCodeConfirm" type="password" placeholder="Confirm code"
                  autocomplete="off" autocapitalize="off" spellcheck="false" />
         </div>
-        <button class="btn-primary" id="chatLockBtn" type="button">Open chat</button>
+        <button class="btn-primary btn-glass-color" id="chatLockBtn" type="button">Open chat</button>
       </div>
       <p class="muted small" id="chatLockStatus"></p>
       <button class="btn-ghost" id="chatLockBackBtn" type="button">← Back</button>
@@ -230,7 +230,7 @@
       <div class="chat-composer">
         <input class="field-input chat-input" id="chatInput" type="text" placeholder="Message"
                autocomplete="off" autocapitalize="sentences" spellcheck="false" />
-        <button class="btn-primary chat-send" id="chatSendBtn" type="button">Send</button>
+        <button class="btn-primary chat-send btn-glass-color" id="chatSendBtn" type="button">Send</button>
       </div>
     </div>
   </section>
@@ -252,7 +252,7 @@
     <h2 id="updateTitle">Update available</h2>
     <p class="muted" id="updateChangelog"></p>
     <div class="dialog-actions">
-      <button class="btn-primary" id="updateBtn" type="button">Update</button>
+      <button class="btn-primary btn-glass-color" id="updateBtn" type="button">Update</button>
       <button class="btn-ghost" id="updateLaterBtn" type="button">Later</button>
     </div>
     <p class="muted small" id="updateStatus"></p>
@@ -261,7 +261,7 @@
 
 <!-- ================= Chat message menu (long-press) ================= -->
 <div class="dialog-overlay" id="chatMsgMenu" hidden>
-  <div class="card dialog-card">
+  <div class="card dialog-card morph-menu">
     <button class="btn-secondary chat-menu-action" id="chatMsgReplyBtn" type="button">Reply</button>
     <button class="btn-secondary chat-menu-action chat-menu-danger" id="chatMsgDeleteBtn" type="button">Delete</button>
     <button class="btn-ghost" id="chatMsgMenuCancel" type="button">Cancel</button>

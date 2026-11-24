@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 10;
+var CURRENT_VERSION_CODE = 11;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -567,6 +567,15 @@ function createBrowser(opts) {
       list.addEventListener('click', function (ev) {
         var up = ev.target.closest('[data-up-btn]');
         if (up) { uploadIntoSection(up); return; }
+        /* Taps inside an upload card (title / file inputs, status text)
+         * must NOT toggle the section: the card itself carries
+         * data-section (uploadIntoSection reads the section id from it),
+         * so closest('[data-section]') below would match the card and
+         * collapse the open section. That hid the card the moment the
+         * user tapped the file input, and re-expanding re-rendered the
+         * card and wiped the picked file — so no upload could ever
+         * complete ("Choose a file." every time). */
+        if (ev.target.closest('.upload-card')) { return; }
         var f = ev.target.closest('[data-folder]');
         if (f) { openFolder(f.getAttribute('data-folder'), state.foldersById[f.getAttribute('data-folder')] || ''); return; }
         var s = ev.target.closest('[data-section]');
@@ -611,9 +620,14 @@ async function refreshSavedTests() {
     if (tests.length === 0) { list.innerHTML = '<p class="muted">No tests.</p>'; return; }
     var html = '';
     tests.forEach(function (t) {
-      html += '<button type="button" class="row-item" data-test="' + esc(t.id) + '" data-title="' + esc(t.title || '') +
+      var lang = (t.language === 'hi') ? 'Hindi' : (t.language === 'en') ? 'English' : (t.language || '');
+      var meta = (t.question_count || '') + ' questions · ' + (t.duration_min || '') + ' min' +
+        (lang ? ' · ' + lang : '');
+      html += '<button type="button" class="test-card" data-test="' + esc(t.id) + '" data-title="' + esc(t.title || '') +
         '" data-q="' + (t.question_count || '') + '" data-m="' + (t.duration_min || '') + '">' +
-        esc(t.title || '') + ' · ' + esc(t.question_count || '') + ' questions · ' + esc(t.duration_min || '') + ' min</button>';
+        '<span class="test-card-start">▶ Start</span>' +
+        '<span class="test-card-title">' + esc(t.title || 'Test') + '</span>' +
+        '<span class="test-card-meta">' + esc(meta) + '</span></button>';
     });
     list.innerHTML = html;
   } catch (e) {
@@ -682,7 +696,8 @@ $('testGenerateBtn').addEventListener('click', async function () {
 /* ================= Take a test ================= */
 /* One question at a time, countdown from duration_min, score computed
  * locally, full review after submit. The result is sent to the server
- * fire-and-forget — a failed submit never blocks the result screen. */
+ * with retries (see submitTakeResult) — a failed submit never blocks
+ * the result screen; it only changes the save-status line. */
 var takeState = null;
 
 function takeFormatTime(sec) {
@@ -740,6 +755,8 @@ async function openTest(testId) {
     $('takeTitle').textContent = test.title || 'Test';
     $('takeBody').hidden = false;
     $('takeResult').hidden = true;
+    var prevStatus = $('takeSaveStatus');
+    if (prevStatus) { prevStatus.textContent = ''; }
     $('testDetail').textContent = '';
     showScreen('screen-take');
     takeRenderTimer();
@@ -755,17 +772,40 @@ async function openTest(testId) {
   }
 }
 
-function submitTakeResult(score, total) {
-  // Same body as apiCall, but a plain fetch: a failed submit must never
-  // lock the user out of the result screen or show an error.
+function takeSaveStatusEl() {
+  var el = $('takeSaveStatus');
+  if (el) { return el; }
+  el = document.createElement('p');
+  el.id = 'takeSaveStatus';
+  el.className = 'muted small';
+  var scoreEl = $('takeScore');
+  if (scoreEl && scoreEl.parentNode) {
+    scoreEl.parentNode.insertBefore(el, scoreEl.nextSibling);
+  }
+  return el;
+}
+
+function sleep(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+async function submitTakeResult(score, total) {
+  // POST /tests/submit with up to 3 attempts (~800ms between them).
+  // Body is exactly what handleTestsSubmit expects: password + deviceId
+  // (from the live session) plus testId/score/total/answers.
+  // Never blocks the result screen: the score and review are already
+  // shown before this is called; only the status line changes.
   if (!takeState) { return; }
+  var statusEl = takeSaveStatusEl();
+  statusEl.textContent = 'Saving result…';
   var payload = {
     testId: takeState.test.id,
     score: score,
     total: total,
     answers: takeState.answers.slice()
   };
-  (async function () {
+  var saved = false;
+  for (var attempt = 1; attempt <= 3 && !saved; attempt++) {
     try {
       if (!window.MsStudySession.deviceId) {
         var dinfo = await getDeviceInfo();
@@ -774,13 +814,20 @@ function submitTakeResult(score, total) {
       }
       var body = { password: window.MsStudySession.password, deviceId: window.MsStudySession.deviceId };
       Object.keys(payload).forEach(function (k) { body[k] = payload[k]; });
-      await fetch(SERVER_URL + '/tests/submit', {
+      var res = await fetch(SERVER_URL + '/tests/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(body)
       });
-    } catch (e) { /* fire-and-forget: ignore */ }
-  })();
+      if (res.ok) {
+        var data = null;
+        try { data = await res.json(); } catch (e) { data = null; }
+        if (data && data.result === 'ok') { saved = true; }
+      }
+    } catch (e) { /* retry below; a failed save never blocks the result */ }
+    if (!saved && attempt < 3) { await sleep(800); }
+  }
+  statusEl.textContent = saved ? 'Result saved.' : 'Could not save result.';
 }
 
 function submitTake() {
@@ -1101,19 +1148,100 @@ var chatState = {
   menuMsgId: null
 };
 
+/* ================= Chat push notifications (FCM) ================= */
+/* Hidden-chat push via @capacitor/push-notifications (FCM, Firebase
+ * project weather-c0a4e — the com.kiara.msstudy client in
+ * google-services.json). The token is sent to the server on join (and
+ * again whenever it refreshes), so the server can push a GENERIC
+ * "New message" alert to the OTHER member when the app is closed.
+ * Everything here is best-effort and silent: if push is unavailable
+ * or the user denies the permission, the chat keeps working exactly
+ * as today by polling every 2s while open. No error is ever shown. */
+var pushState = { token: null, listenersAdded: false };
+var PUSH_TOKEN_KEY = 'ms_push_token';
+
+function pushPlugin() { return capPlugin('PushNotifications'); }
+
+/* Re-send the current token to the server for the open room (if any).
+ * Called when a token arrives/refreshes and after joining a chat. */
+async function sendPushTokenToServer() {
+  if (!pushState.token || !chatState.code || !authed) { return; }
+  try {
+    await apiCall('/chat/push-token', { code: chatState.code, pushToken: pushState.token });
+  } catch (e) { /* silent: re-sent on the next join / token refresh */ }
+}
+
+/* Ask for the notification permission (only prompts when the status is
+ * 'prompt' — a denied user is never re-prompted) and register for FCM.
+ * Skipped when we already have a token; the 'registration' listener
+ * below re-fires on token refresh, so a rotated token is re-sent. */
+async function ensurePushRegistered() {
+  var plugin = pushPlugin();
+  if (!plugin || pushState.token) { return; }
+  try {
+    var perm = await plugin.checkPermissions();
+    if (perm && perm.receive === 'prompt') { perm = await plugin.requestPermissions(); }
+    if (perm && perm.receive === 'denied') { return; }
+  } catch (e) { /* pre-Android 13 / no prompt: carry on to register */ }
+  try { await plugin.register(); } catch (e) { /* silent: polling still works */ }
+}
+
+async function initPushNotifications() {
+  var plugin = pushPlugin();
+  if (!plugin) { return; }
+  if (!pushState.listenersAdded) {
+    pushState.listenersAdded = true;
+    try {
+      plugin.addListener('registration', function (t) {
+        if (t && t.value) {
+          pushState.token = t.value;
+          try { window.localStorage.setItem(PUSH_TOKEN_KEY, t.value); } catch (e) {}
+          sendPushTokenToServer();
+        }
+      });
+      plugin.addListener('registrationError', function () { /* silent */ });
+      plugin.addListener('pushNotificationReceived', function () {
+        /* App is open: pull the new message now instead of waiting
+         * for the next 2s poll tick. */
+        if (chatState.code) { loadChatMessages(false); }
+      });
+      plugin.addListener('pushNotificationActionPerformed', function () {
+        /* Tapping the notification opens the app; if signed in, go
+         * straight to the chat lock screen. */
+        if (authed) { openChatLock(); }
+      });
+    } catch (e) { /* listeners unavailable: polling still works */ }
+    /* A token from an earlier run: the 'registration' event may not
+     * fire again for an unchanged token, so restore + re-send it. */
+    try {
+      var saved = window.localStorage.getItem(PUSH_TOKEN_KEY);
+      if (saved) { pushState.token = saved; }
+    } catch (e) {}
+  }
+  await ensurePushRegistered();
+}
+
 /* Join (or create) the room for this code. The device id IS the member
  * identity, so make sure it is populated first. */
 async function joinChat(code) {
   var info = await getDeviceInfo();
   window.MsStudySession.deviceId = info.deviceId;
   chatState.myDeviceId = info.deviceId;
-  var data = await apiCall('/chat/join', { code: code });
+  /* Fallback registration: if the boot-time attempt had no token yet
+   * (permission granted later, first run), try again now — the token
+   * is sent with this join when available, and re-sent via
+   * /chat/push-token when the 'registration' event fires. */
+  ensurePushRegistered();
+  var data = await apiCall('/chat/join', { code: code, pushToken: pushState.token || undefined });
   if (!data || data.result === 'full') { return { ok: false, reason: 'full' }; }
   if (!data || data.result !== 'ok') { return { ok: false, reason: 'retry' }; }
   chatState.code = code;
   chatState.roomId = data.roomId || null;
   chatState.members = data.members || [];
   chatState.presence = data.presence || [];
+  /* The token may have arrived while the join was in flight (the
+   * 'registration' listener skips sending until a room is open). */
+  sendPushTokenToServer();
   return { ok: true };
 }
 
@@ -1521,6 +1649,9 @@ async function trySavedLogin() {
   showScreen('screen-lock');
 }
 trySavedLogin();
+/* Push notifications for the hidden chat (best-effort, silent if
+ * unavailable — the chat keeps polling while open either way). */
+initPushNotifications();
 /* Check for an update on launch too (not only after login), so the app
  * can update itself even before signing in. */
 checkForUpdate();
