@@ -3,6 +3,10 @@
    palette, springy taps, 200-300ms transitions. Light theme first.
    Clean, not gradient-heavy. */
 
+/* The `hidden` attribute must win over any display rule (e.g. .dialog-overlay
+   sets display:flex). Without this, hidden dialogs/screens show on launch. */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #f4f6f9;
   --surface: rgba(255, 255, 255, 0.72);
