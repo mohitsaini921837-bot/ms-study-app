@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 9;
+var CURRENT_VERSION_CODE = 10;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };

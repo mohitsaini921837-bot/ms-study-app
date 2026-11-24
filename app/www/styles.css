@@ -9,9 +9,9 @@
 
 :root {
   --bg: #f4f6f9;
-  --surface: rgba(255, 255, 255, 0.72);
+  --surface: #ffffff;
   --surface-solid: #ffffff;
-  --surface-muted: rgba(255, 255, 255, 0.5);
+  --surface-muted: #eef1f5;
   --ink: #14181f;
   --muted: #6b7280;
   --border: rgba(20, 24, 31, 0.08);
@@ -60,23 +60,18 @@ p { margin: 0 0 12px; line-height: 1.55; }
   padding: 0 16px;
   padding-top: env(safe-area-inset-top);
   background: var(--surface);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
   border-bottom: 1px solid var(--border);
 }
 .app-logo {
   width: 44px;
   height: 44px;
   border-radius: 14px;
-  object-fit: cover;
+  object-fit: contain;
   flex: 0 0 auto;
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
-  /* The logo art is very light frosted glass — invisible on the light UI
-   * without a solid tile behind it. */
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
-  padding: 5px;
+  background: transparent;
 }
 .app-title-wrap { line-height: 1.15; min-width: 0; }
 .app-title { font-size: 20px; font-weight: 800; letter-spacing: 0.3px; }
@@ -98,8 +93,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
 .icon-btn {
   border: 1px solid var(--border);
   background: var(--surface);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   color: var(--ink);
   border-radius: 999px;
   padding: 8px 14px;
@@ -123,8 +116,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
 /* ---------- Cards (frosted glass) ---------- */
 .card {
   background: var(--surface);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 20px;
@@ -176,7 +167,7 @@ p { margin: 0 0 12px; line-height: 1.55; }
 
 /* ---------- Lock screens ---------- */
 .lock-wrap { max-width: 420px; margin: 24px auto 0; text-align: center; }
-.lock-logo { width: 96px; height: 96px; border-radius: 28px; object-fit: cover; margin-bottom: 14px; box-shadow: 0 10px 30px rgba(20, 24, 31, 0.14); background: linear-gradient(135deg, #2563eb, #1d4ed8); padding: 10px; }
+.lock-logo { width: 96px; height: 96px; border-radius: 28px; object-fit: contain; margin-bottom: 14px; background: transparent; }
 .lock-title { font-size: 30px; font-weight: 800; }
 .lock-sub { color: var(--muted); margin-bottom: 24px; }
 .lock-card { text-align: left; }
@@ -262,8 +253,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
 .section-uploads { margin-top: 12px; }
 .upload-card {
   background: var(--surface);
-  backdrop-filter: blur(14px) saturate(1.4);
-  -webkit-backdrop-filter: blur(14px) saturate(1.4);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 14px;
@@ -285,8 +274,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
   gap: 2px;
   padding: 8px;
   background: var(--surface);
-  backdrop-filter: blur(20px) saturate(1.5);
-  -webkit-backdrop-filter: blur(20px) saturate(1.5);
   border: 1px solid var(--border);
   border-radius: 28px;
   box-shadow: 0 12px 32px rgba(20, 24, 31, 0.14);
@@ -320,8 +307,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
   justify-content: center;
   padding: 24px;
   background: rgba(20, 24, 31, 0.35);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
 }
 .dialog-card { width: 100%; max-width: 420px; margin: 0; animation: screen-in 260ms var(--spring); }
 .dialog-actions { display: flex; gap: 10px; margin-top: 16px; }

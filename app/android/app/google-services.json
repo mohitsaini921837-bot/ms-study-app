@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "631395187325",
+    "project_id": "weather-c0a4e",
+    "storage_bucket": "weather-c0a4e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:631395187325:android:a0ed5c7ec92e4d59484f14",
+        "android_client_info": {
+          "package_name": "com.kiara.msstudy"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBf1l80WLHzRFz4ndUQLOVJYH9TvkazM4w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:631395187325:android:678ddb46165a018c484f14",
+        "android_client_info": {
+          "package_name": "com.kiara.weather"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBf1l80WLHzRFz4ndUQLOVJYH9TvkazM4w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
