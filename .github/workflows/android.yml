@@ -22,6 +22,9 @@
 # (i.e. the contents of ~/workspace/ms-study/).
 name: Build MS Study APK
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [main]
