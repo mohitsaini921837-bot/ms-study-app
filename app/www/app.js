@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 21;
+var CURRENT_VERSION_CODE = 22;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -1483,8 +1483,13 @@ function renderPracticeChapters(subject) {
     : '<p class="muted">No chapters.</p>';
 }
 
+/* v1.0.21: the practice-sets list uses its own ids (practiceSetsList /
+ * practiceSetsDetail). The id "practiceList" is the Drive file browser's
+ * list on screen-practice — reusing it here made getElementById return
+ * that hidden element, so the set cards were drawn off-screen and the
+ * chapter page looked empty. */
 function renderPracticeList(tests, title) {
-  renderTestList(tests, title, { title: 'practiceListTitle', list: 'practiceList', detail: 'practiceListDetail' });
+  renderTestList(tests, title, { title: 'practiceListTitle', list: 'practiceSetsList', detail: 'practiceSetsDetail' });
 }
 
 function rerenderPracticeSubPage() {
@@ -1555,7 +1560,7 @@ $('practiceChapterList').addEventListener('click', function (ev) {
   openPracticeChapter(c.getAttribute('data-practice-chapter'));
 });
 
-$('practiceList').addEventListener('click', function (ev) {
+$('practiceSetsList').addEventListener('click', function (ev) {
   var b = ev.target.closest('[data-act]');
   if (!b) { return; }
   var testId = b.getAttribute('data-test');
@@ -1567,7 +1572,7 @@ $('practiceList').addEventListener('click', function (ev) {
   if (act === 'result') {
     var attempt = savedAttempts[testId];
     if (attempt) { viewSavedResult(testId, attempt); return; }
-    var detailEl = $('practiceListDetail');
+    var detailEl = $('practiceSetsDetail');
     if (detailEl) { detailEl.textContent = 'Loading…'; }
     apiCall('/tests/last-attempt', { testId: testId }).then(function (d) {
       lastAttemptChecked[testId] = true;
