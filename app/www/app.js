@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 15;
+var CURRENT_VERSION_CODE = 16;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -1062,16 +1062,48 @@ async function refreshSavedTests(silent) {
     var data = await apiCall('/tests/list', {});
     var tests = (data && data.tests) || [];
     if (tests.length === 0) { list.innerHTML = '<p class="muted">No tests.</p>'; return; }
+    // v1.0.15: Vidyagram-like structure — tests are grouped by category
+    // (e.g. REASONING) then chapter (e.g. Analogy), each group an
+    // expandable glass row; the test cards sit inside their chapter.
     var html = '';
+    var groups = {};
+    var groupOrder = [];
     tests.forEach(function (t) {
-      var lang = (t.language === 'hi') ? 'Hindi' : (t.language === 'en') ? 'English' : (t.language || '');
-      var meta = (t.question_count || '') + ' questions · ' + (t.duration_min || '') + ' min' +
-        (lang ? ' · ' + lang : '');
-      html += '<button type="button" class="test-card" data-test="' + esc(t.id) + '" data-title="' + esc(t.title || '') +
-        '" data-q="' + (t.question_count || '') + '" data-m="' + (t.duration_min || '') + '">' +
-        '<span class="test-card-start">▶ Start</span>' +
-        '<span class="test-card-title">' + esc(t.title || 'Test') + '</span>' +
-        '<span class="test-card-meta">' + esc(meta) + '</span></button>';
+      var cat = (t.category || 'Tests').toString();
+      var chap = (t.chapter || '').toString();
+      var key = cat + '\u0000' + chap;
+      if (!groups[key]) {
+        groups[key] = { category: cat, chapter: chap, tests: [] };
+        groupOrder.push(key);
+      }
+      groups[key].tests.push(t);
+    });
+    var openCat = window.__testsOpenCat || null;
+    var openChap = window.__testsOpenChap || null;
+    groupOrder.forEach(function (key) {
+      var g = groups[key];
+      var catOpen = (openCat === g.category);
+      var chapOpen = catOpen && (openChap === g.chapter);
+      html += '<button type="button" class="row-item test-group-row" data-test-cat="' + esc(g.category) + '">' +
+        '<span class="row-label">📁 ' + esc(g.category) + '</span>' +
+        '<span class="row-count">' + g.tests.length + ' test' + (g.tests.length > 1 ? 's' : '') + '</span></button>';
+      if (!catOpen) { return; }
+      if (g.chapter) {
+        html += '<button type="button" class="row-item test-group-row test-chapter-row" data-test-chap="' + esc(g.chapter) + '">' +
+          '<span class="row-label">📂 ' + esc(g.chapter) + '</span>' +
+          '<span class="row-count">' + g.tests.length + ' test' + (g.tests.length > 1 ? 's' : '') + '</span></button>';
+        if (!chapOpen) { return; }
+      }
+      g.tests.forEach(function (t) {
+        var lang = (t.language === 'hi') ? 'Hindi' : (t.language === 'en') ? 'English' : (t.language || '');
+        var meta = (t.question_count || '') + ' questions · ' + (t.duration_min || '') + ' min' +
+          (lang ? ' · ' + lang : '');
+        html += '<button type="button" class="test-card" data-test="' + esc(t.id) + '" data-title="' + esc(t.title || '') +
+          '" data-q="' + (t.question_count || '') + '" data-m="' + (t.duration_min || '') + '">' +
+          '<span class="test-card-start">▶ Start</span>' +
+          '<span class="test-card-title">' + esc(t.title || 'Test') + '</span>' +
+          '<span class="test-card-meta">' + esc(meta) + '</span></button>';
+      });
     });
     list.innerHTML = html;
     // Per test, ask the server for THIS user's latest attempt (never anyone
@@ -1124,6 +1156,23 @@ function showTestChoice(testId, attempt, title) {
 }
 
 $('savedTestsList').addEventListener('click', function (ev) {
+  // v1.0.15: category / chapter group rows expand and collapse (the
+  // Vidyagram-like structure); the test cards still open the test.
+  var cat = ev.target.closest('[data-test-cat]');
+  if (cat) {
+    var catName = cat.getAttribute('data-test-cat');
+    window.__testsOpenCat = (window.__testsOpenCat === catName) ? null : catName;
+    window.__testsOpenChap = null;
+    refreshSavedTests(true);
+    return;
+  }
+  var chap = ev.target.closest('[data-test-chap]');
+  if (chap) {
+    var chapName = chap.getAttribute('data-test-chap');
+    window.__testsOpenChap = (window.__testsOpenChap === chapName) ? null : chapName;
+    refreshSavedTests(true);
+    return;
+  }
   var b = ev.target.closest('[data-test]');
   if (!b) { return; }
   var testId = b.getAttribute('data-test');
@@ -1200,17 +1249,27 @@ function takeRenderQuestion() {
   if (!st) { return; }
   var q = st.questions[st.idx];
   $('takeProgress').textContent = 'Question ' + (st.idx + 1) + ' of ' + st.questions.length;
-  $('takeQuestion').textContent = q.question || '';
+  // v1.0.15: live answered counter + marks / negative marking line.
+  var answered = 0;
+  st.answers.forEach(function (a) { if (a !== -1) { answered += 1; } });
+  $('takeAnsweredCount').textContent = answered + ' of ' + st.questions.length + ' answered';
+  $('takeMarks').textContent = 'Marks for correct answer: ' + st.marksPerQ + ' | Negative: ' + st.negativePerQ;
+  // v1.0.15: zoom level applies to the question + options.
+  var qEl = $('takeQuestion');
+  qEl.style.fontSize = (17 + st.zoomLevel * 2) + 'px';
+  qEl.textContent = q.question || '';
   var letters = ['A', 'B', 'C', 'D'];
   var html = '';
   (q.options || []).forEach(function (opt, i) {
     html += '<button type="button" class="take-option' + (st.answers[st.idx] === i ? ' selected' : '') +
-      '" data-opt="' + i + '">' + esc(letters[i] + '. ' + (opt || '')) + '</button>';
+      '" data-opt="' + i + '" style="font-size:' + (15 + st.zoomLevel * 2) + 'px">' + esc(letters[i] + '. ' + (opt || '')) + '</button>';
   });
   $('takeOptions').innerHTML = html;
   $('takePrevBtn').disabled = (st.idx === 0);
   var last = (st.idx === st.questions.length - 1);
   $('takeNextBtn').textContent = last ? 'Submit' : 'Next';
+  // v1.0.15: Mark for Review button shows the current state.
+  $('takeMarkBtn').textContent = st.marked[st.idx] ? 'Unmark Review' : 'Mark for Review';
   // Palette stays live: if it is open, refresh it as the current question
   // and the answered counts change.
   var pal = $('takePalette');
@@ -1225,18 +1284,31 @@ async function openTest(testId) {
     var test = (data && data.test) || {};
     if (!questions.length) { $('testDetail').textContent = 'Try again.'; return; }
     stopTakeTimer();
+    // v1.0.15: negative marking — 0.25 per wrong answer (Vidyagram
+    // standard: 25%). Marks per question = total marks / questions
+    // (usually 1). Score = correct*marksPerQ - wrong*negativePerQ.
+    var totalMarks = (typeof test.total_marks === 'number') ? test.total_marks : questions.length;
+    var marksPerQ = questions.length ? Math.round((totalMarks / questions.length) * 100) / 100 : 1;
+    if (!marksPerQ || marksPerQ <= 0) { marksPerQ = 1; }
     takeState = {
       test: test,
       questions: questions,
       idx: 0,
       answers: questions.map(function () { return -1; }),
+      marked: questions.map(function () { return false; }),
+      zoomLevel: 0,
+      paused: false,
+      marksPerQ: marksPerQ,
+      negativePerQ: Math.round(marksPerQ * 0.25 * 100) / 100,
       remainingSec: Math.max(1, (parseInt(test.duration_min, 10) || 10) * 60),
       timer: null,
       submitted: false,
-      startedAt: Date.now()
+      startedAt: null
     };
     $('takeTitle').textContent = test.title || 'Test';
-    $('takeBody').hidden = false;
+    $('takeIntroDetail').textContent = 'Duration: ' + (parseInt(test.duration_min, 10) || 10) + ' minutes · Questions: ' + questions.length + ' · Marks: ' + totalMarks + ' · Negative marking: 25% per wrong answer.';
+    $('takeIntro').hidden = false;
+    $('takeBody').hidden = true;
     $('takeResult').hidden = true;
     var prevStatus = $('takeSaveStatus');
     if (prevStatus) { prevStatus.textContent = ''; }
@@ -1244,16 +1316,26 @@ async function openTest(testId) {
     showScreen('screen-take');
     pushBack({ kind: 'take', undo: exitTakeScreen });
     takeRenderTimer();
-    takeRenderQuestion();
-    takeState.timer = setInterval(function () {
-      if (!takeState || takeState.submitted) { return; }
-      takeState.remainingSec -= 1;
-      takeRenderTimer();
-      if (takeState.remainingSec <= 0) { submitTake(); }
-    }, 1000);
   } catch (e) {
     $('testDetail').textContent = e.message || 'Try again.';
   }
+}
+
+/* v1.0.15: the timer starts only when "I am ready to begin" is tapped
+ * (Vidyagram-style instructions screen). */
+function startTakeTest() {
+  var st = takeState;
+  if (!st || st.startedAt) { return; }
+  st.startedAt = Date.now();
+  $('takeIntro').hidden = true;
+  $('takeBody').hidden = false;
+  takeRenderQuestion();
+  st.timer = setInterval(function () {
+    if (!takeState || takeState.submitted || takeState.paused) { return; }
+    takeState.remainingSec -= 1;
+    takeRenderTimer();
+    if (takeState.remainingSec <= 0) { submitTake(); }
+  }, 1000);
 }
 
 function takeSaveStatusEl() {
@@ -1344,24 +1426,51 @@ function takeSummaryHtml(detail) {
 
 /* Question-by-question review from a questions list + an answers array
  * (answers[i] = chosen option index, -1 = not answered). Shared by the
- * fresh result and the saved-result view. */
-function takeReviewHtml(questions, answers) {
+ * fresh result and the saved-result view. v1.0.15: filter tabs
+ * (All/Correct/Incorrect/Unattempted/Marked) + a "Marked for review"
+ * tag on flagged questions. */
+var takeReviewFilter = 'all';
+var takeReviewCache = null; // {questions, answers, marked}
+
+function takeReviewHtml(questions, answers, marked) {
   var letters = ['A', 'B', 'C', 'D'];
   var html = '';
   (questions || []).forEach(function (q, i) {
     var chosen = (answers && typeof answers[i] === 'number') ? answers[i] : -1;
     var correct = (typeof q.answer_index === 'number') ? q.answer_index : -1;
     var ok = (chosen !== -1 && chosen === correct);
+    var isMarked = !!(marked && marked[i]);
+    var kind = ok ? 'correct' : (chosen === -1 ? 'unattempted' : 'incorrect');
+    // Apply the active filter tab.
+    if (takeReviewFilter !== 'all') {
+      if (takeReviewFilter === 'marked' && !isMarked) { return; }
+      if (takeReviewFilter !== 'marked' && takeReviewFilter !== kind) { return; }
+    }
     html += '<div class="take-review-item">' +
       '<p class="take-review-q">' + esc((i + 1) + '. ' + (q.question || '')) + '</p>' +
       '<p class="take-review-line ' + (ok ? 'take-correct' : 'take-wrong') + '">' +
       (ok ? '✓ Correct' : (chosen === -1 ? '– Not attempted' : '✗ Wrong')) + '</p>' +
+      (isMarked ? '<p class="take-review-line take-marked-tag">★ Marked for review</p>' : '') +
       '<p class="take-review-line">Your answer: ' + esc(chosen === -1 ? 'Not answered' : (letters[chosen] + '. ' + ((q.options || [])[chosen] || ''))) + '</p>' +
       '<p class="take-review-line">Correct answer: ' + esc(correct === -1 ? '—' : (letters[correct] + '. ' + ((q.options || [])[correct] || ''))) + '</p>' +
       (q.explanation ? '<p class="take-review-line take-explain">' + esc(q.explanation) + '</p>' : '') +
       '</div>';
   });
-  return html;
+  return html || '<p class="muted">No questions in this filter.</p>';
+}
+
+function showTakeReview(filter) {
+  takeReviewFilter = filter || 'all';
+  if (!takeReviewCache) { return; }
+  $('takeReview').innerHTML = takeReviewHtml(takeReviewCache.questions, takeReviewCache.answers, takeReviewCache.marked);
+  var filters = $('takeReviewFilters');
+  if (filters) {
+    filters.hidden = false;
+    var btns = filters.querySelectorAll('[data-review-filter]');
+    btns.forEach(function (b) {
+      b.classList.toggle('take-filter-active', b.getAttribute('data-review-filter') === takeReviewFilter);
+    });
+  }
 }
 
 /* Counts from questions + answers (fallback when the server row has no
@@ -1382,7 +1491,9 @@ function submitTake() {
   st.submitted = true;
   stopTakeTimer();
   var counts = takeCountsFromAnswers(st.questions, st.answers);
-  var score = counts.correct;
+  // v1.0.15: negative marking — score = correct*marks - wrong*negative.
+  var score = Math.round((counts.correct * st.marksPerQ - counts.wrong * st.negativePerQ) * 100) / 100;
+  if (score < 0) { score = 0; }
   var timeTakenSec = st.startedAt ? Math.max(0, Math.round((Date.now() - st.startedAt) / 1000)) : 0;
   var detail = {
     score: score,
@@ -1394,7 +1505,8 @@ function submitTake() {
   };
   $('takeSummary').innerHTML = takeSummaryHtml(detail);
   $('takeScore').textContent = 'You scored ' + score + ' out of ' + st.questions.length + '.';
-  $('takeReview').innerHTML = takeReviewHtml(st.questions, st.answers);
+  takeReviewCache = { questions: st.questions, answers: st.answers.slice(), marked: st.marked.slice() };
+  showTakeReview('all');
   $('takeBody').hidden = true;
   $('takeResult').hidden = false;
   submitTakeResult(score, st.questions.length, detail);
@@ -1433,7 +1545,8 @@ async function viewSavedResult(testId, attempt) {
     $('takeTimer').textContent = '';
     $('takeSummary').innerHTML = takeSummaryHtml(detail);
     $('takeScore').textContent = 'You scored ' + score + ' out of ' + total + '.';
-    $('takeReview').innerHTML = takeReviewHtml(questions, answers);
+    takeReviewCache = { questions: questions, answers: answers.slice(), marked: questions.map(function () { return false; }) };
+    showTakeReview('all');
     var prevStatus = $('takeSaveStatus');
     if (prevStatus) { prevStatus.textContent = ''; }
     $('testDetail').textContent = '';
@@ -1483,10 +1596,15 @@ function takeRenderPalette() {
   var html = '';
   st.questions.forEach(function (q, i) {
     var done = (st.answers[i] !== -1);
+    var marked = !!(st.marked && st.marked[i]);
     if (done) { answered += 1; }
+    // v1.0.15: palette colours — green = answered, red = marked (not
+    // answered), yellow = answered + marked (Vidyagram legend).
     var cls = 'take-palette-num' +
       (i === st.idx ? ' is-current' : '') +
-      (done ? ' is-done' : '');
+      (done ? ' is-done' : '') +
+      (marked && done ? ' is-marked-done' : '') +
+      (marked && !done ? ' is-marked' : '');
     html += '<button type="button" class="' + cls + '" data-jump="' + i + '">' + (i + 1) + '</button>';
   });
   grid.innerHTML = html;
@@ -1521,6 +1639,57 @@ $('takePaletteGrid').addEventListener('click', function (ev) {
 
 $('takeBackBtn').addEventListener('click', function () { goBackOneStep(); });
 $('takeDoneBtn').addEventListener('click', function () { goBackOneStep(); });
+
+/* v1.0.15: new test-taking controls (Vidyagram features). */
+$('takeStartBtn').addEventListener('click', startTakeTest);
+
+$('takeMarkBtn').addEventListener('click', function () {
+  if (!takeState || takeState.submitted) { return; }
+  takeState.marked[takeState.idx] = !takeState.marked[takeState.idx];
+  takeRenderQuestion();
+});
+
+$('takeClearBtn').addEventListener('click', function () {
+  if (!takeState || takeState.submitted) { return; }
+  takeState.answers[takeState.idx] = -1;
+  takeRenderQuestion();
+});
+
+$('takeZoomInBtn').addEventListener('click', function () {
+  if (!takeState) { return; }
+  takeState.zoomLevel = Math.min(3, takeState.zoomLevel + 1);
+  takeRenderQuestion();
+});
+
+$('takeZoomOutBtn').addEventListener('click', function () {
+  if (!takeState) { return; }
+  takeState.zoomLevel = Math.max(-2, takeState.zoomLevel - 1);
+  takeRenderQuestion();
+});
+
+function takePause() {
+  if (!takeState || takeState.submitted || takeState.paused) { return; }
+  takeState.paused = true;
+  var answered = 0;
+  takeState.answers.forEach(function (a) { if (a !== -1) { answered += 1; } });
+  $('takePauseSummary').textContent = 'Answered: ' + answered + ' · Not answered: ' + (takeState.questions.length - answered) + ' · Time left: ' + takeFormatTime(Math.max(0, takeState.remainingSec));
+  $('takePauseOverlay').hidden = false;
+  pushBack({ kind: 'takepause', undo: takeResume });
+}
+function takeResume() {
+  if (!takeState) { return; }
+  takeState.paused = false;
+  removeBackEntry('takepause');
+  $('takePauseOverlay').hidden = true;
+}
+$('takePauseBtn').addEventListener('click', takePause);
+$('takeResumeBtn').addEventListener('click', takeResume);
+
+$('takeReviewFilters').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-review-filter]');
+  if (!b) { return; }
+  showTakeReview(b.getAttribute('data-review-filter'));
+});
 
 /* ================= Admin ================= */
 function adminHeaders() {

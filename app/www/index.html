@@ -76,21 +76,62 @@
     <h2 id="takeTitle"></h2>
     <p class="muted small" id="takeTimer"></p>
 
+    <!-- v1.0.15: pre-test instructions (Vidyagram-style) -->
+    <div id="takeIntro" hidden>
+      <div class="card">
+        <h3>Instructions</h3>
+        <p class="muted small" id="takeIntroDetail"></p>
+        <p class="muted small">• Answer each question, then tap Next. You can go back with Previous.</p>
+        <p class="muted small">• Tap an option again to clear it, or use Clear.</p>
+        <p class="muted small">• Mark for Review flags a question to come back to — it still counts as answered if you answered it.</p>
+        <p class="muted small">• Wrong answers lose marks (negative marking). The test auto-submits when the time ends.</p>
+        <p class="muted small">• You can pause the test — the timer freezes while paused.</p>
+        <button class="btn-primary btn-glass-color" id="takeStartBtn" type="button">I am ready to begin</button>
+      </div>
+    </div>
+
     <div id="takeBody">
-      <button class="btn-secondary take-palette-btn" id="takePaletteBtn" type="button">☰ All questions</button>
+      <div class="take-topbar">
+        <button class="btn-secondary take-palette-btn" id="takePaletteBtn" type="button">☰ All questions</button>
+        <span class="take-zoom">
+          <button class="btn-secondary take-zoom-btn" id="takeZoomOutBtn" type="button" aria-label="Smaller text">A−</button>
+          <button class="btn-secondary take-zoom-btn" id="takeZoomInBtn" type="button" aria-label="Larger text">A+</button>
+        </span>
+        <button class="btn-secondary take-pause-btn" id="takePauseBtn" type="button">⏸ Pause</button>
+      </div>
+      <p class="muted small" id="takeMarks"></p>
       <p class="muted small" id="takeProgress"></p>
+      <p class="muted small" id="takeAnsweredCount"></p>
       <p id="takeQuestion"></p>
       <div id="takeOptions"></div>
       <div class="take-nav">
         <button class="btn-secondary" id="takePrevBtn" type="button">Previous</button>
+        <button class="btn-secondary" id="takeClearBtn" type="button">Clear</button>
+        <button class="btn-secondary" id="takeMarkBtn" type="button">Mark for Review</button>
         <button class="btn-primary btn-glass-color" id="takeNextBtn" type="button">Next</button>
       </div>
       <button class="btn-primary take-submit btn-glass-color" id="takeSubmitBtn" type="button">Submit</button>
     </div>
 
+    <!-- v1.0.15: pause overlay (timer frozen, summary, resume) -->
+    <div class="dialog-overlay" id="takePauseOverlay" hidden>
+      <div class="dialog-card">
+        <h3>Test paused</h3>
+        <p class="muted small" id="takePauseSummary"></p>
+        <button class="btn-primary btn-glass-color" id="takeResumeBtn" type="button">Resume Test</button>
+      </div>
+    </div>
+
     <div id="takeResult" hidden>
       <div id="takeSummary"></div>
       <p id="takeScore"></p>
+      <div class="take-review-filters" id="takeReviewFilters" hidden>
+        <button class="btn-secondary take-filter-btn" data-review-filter="all" type="button">All</button>
+        <button class="btn-secondary take-filter-btn" data-review-filter="correct" type="button">Correct</button>
+        <button class="btn-secondary take-filter-btn" data-review-filter="incorrect" type="button">Incorrect</button>
+        <button class="btn-secondary take-filter-btn" data-review-filter="unattempted" type="button">Unattempted</button>
+        <button class="btn-secondary take-filter-btn" data-review-filter="marked" type="button">Marked</button>
+      </div>
       <div id="takeReview"></div>
       <button class="btn-primary btn-glass-color" id="takeDoneBtn" type="button">Back to tests</button>
     </div>

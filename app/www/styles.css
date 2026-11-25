@@ -754,6 +754,34 @@ p { margin: 0 0 12px; line-height: 1.55; }
   box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.25), 0 4px 14px rgba(124, 92, 255, 0.25);
 }
 .take-palette-num.is-current.is-done { border-color: #fff; color: #fff; box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.45), 0 4px 14px rgba(124, 92, 255, 0.4); }
+/* v1.0.15: marked-for-review palette colours (Vidyagram legend) —
+ * red = marked, not answered; yellow = answered + marked. */
+.take-palette-num.is-marked {
+  background: #fee2e2; border-color: #fca5a5; color: #b91c1c;
+}
+.take-palette-num.is-marked-done {
+  background: #fef3c7; border-color: #fcd34d; color: #92400e;
+}
+
+/* v1.0.15: test-taking top bar (palette + zoom + pause), marks line,
+ * review filter tabs and the marked tag. */
+.take-topbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.take-topbar .take-palette-btn { flex: 1; }
+.take-zoom { display: flex; gap: 6px; }
+.take-zoom-btn { min-width: 44px; padding: 8px 10px; }
+.take-pause-btn { white-space: nowrap; }
+.take-marked-tag { color: #b45309; font-weight: 700; }
+.take-review-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.take-filter-btn { padding: 7px 12px; font-size: 13px; }
+.take-filter-btn.take-filter-active {
+  background: var(--glass-grad); color: #fff; border-color: transparent;
+  box-shadow: 0 4px 14px rgba(124, 92, 255, 0.35);
+}
+
+/* v1.0.15: test category / chapter group rows (Vidyagram-like structure)
+ * — same glass row as folders, chapters indented one level. */
+.test-group-row { width: 100%; text-align: left; margin-bottom: 8px; }
+.test-chapter-row { margin-left: 18px; width: calc(100% - 18px); }
 
 /* ---------- Saved test card: previous-result badge ---------- */
 .test-card-badge {

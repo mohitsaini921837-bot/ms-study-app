@@ -1,6 +1,1 @@
-{
-  "apkUrl": "https://mohitsaini921837-bot.github.io/ms-study-app/update/MS-Study-v1.0.14.apk",
-  "changelog": "AI test generation removed — tests are uploaded manually and visible to everyone. New Mark as complete: 3-dot menu on every folder, section, note and practice sheet, green tick that stays saved with your password on any phone.",
-  "version": "1.0.14",
-  "versionCode": 15
-}
+{"apkUrl":"https://mohitsaini921837-bot.github.io/ms-study-app/update/MS-Study-v1.0.15.apk","changelog":"Vidyagram-style test features: Mark for Review, Clear response, negative marking (0.25), Zoom, Pause, live answered counter, review filter tabs, and a pre-test instructions screen. Tests now group by category and chapter like Vidyagram. First manual test uploaded: Analogy SET-01 (Hindi, 20 questions).","version":"1.0.15","versionCode":16}
