@@ -95,25 +95,25 @@ jobs:
 
       - name: Rename APK
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk MS-Study-v1.0.20.apk
-          ls -l MS-Study-v1.0.20.apk
+          cp android/app/build/outputs/apk/release/app-release.apk MS-Study-v1.0.21.apk
+          ls -l MS-Study-v1.0.21.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ms-study-v1.0.20-apk
-          path: app/MS-Study-v1.0.20.apk
+          name: ms-study-v1.0.21-apk
+          path: app/MS-Study-v1.0.21.apk
           if-no-files-found: error
 
-      - name: Create GitHub Release v1.0.20
+      - name: Create GitHub Release v1.0.21
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd "$GITHUB_WORKSPACE"
-          if gh release view v1.0.20 >/dev/null 2>&1; then
-            gh release upload v1.0.20 app/MS-Study-v1.0.20.apk --clobber
+          if gh release view v1.0.21 >/dev/null 2>&1; then
+            gh release upload v1.0.21 app/MS-Study-v1.0.21.apk --clobber
           else
-            gh release create v1.0.20 app/MS-Study-v1.0.20.apk \
-              --title "MS Study v1.0.20" \
-              --notes "Practice question sets (UPSI Reasoning, instant results)."
+            gh release create v1.0.21 app/MS-Study-v1.0.21.apk \
+              --title "MS Study v1.0.21" \
+              --notes "Practice question sets (UPSI Reasoning, instant results) — chapter page fix."
           fi
