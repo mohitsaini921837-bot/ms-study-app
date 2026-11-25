@@ -95,25 +95,25 @@ jobs:
 
       - name: Rename APK
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk MS-Study-v1.0.16.apk
-          ls -l MS-Study-v1.0.16.apk
+          cp android/app/build/outputs/apk/release/app-release.apk MS-Study-v1.0.17.apk
+          ls -l MS-Study-v1.0.17.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ms-study-v1.0.16-apk
-          path: app/MS-Study-v1.0.16.apk
+          name: ms-study-v1.0.17-apk
+          path: app/MS-Study-v1.0.17.apk
           if-no-files-found: error
 
-      - name: Create GitHub Release v1.0.16
+      - name: Create GitHub Release v1.0.17
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd "$GITHUB_WORKSPACE"
-          if gh release view v1.0.16 >/dev/null 2>&1; then
-            gh release upload v1.0.16 app/MS-Study-v1.0.16.apk --clobber
+          if gh release view v1.0.17 >/dev/null 2>&1; then
+            gh release upload v1.0.17 app/MS-Study-v1.0.17.apk --clobber
           else
-            gh release create v1.0.16 app/MS-Study-v1.0.16.apk \
-              --title "MS Study v1.0.16" \
+            gh release create v1.0.17 app/MS-Study-v1.0.17.apk \
+              --title "MS Study v1.0.17" \
               --notes "Liquid glass morphing UI everywhere, glass MS logo restored, test cards, reliable result save, push notifications."
           fi
