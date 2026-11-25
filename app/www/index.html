@@ -144,6 +144,12 @@
       <p class="muted small" id="takeProgress"></p>
       <p class="muted small" id="takeAnsweredCount"></p>
       <p id="takeQuestion"></p>
+      <!-- v1.0.22: image system — question figure sits above the stem.
+           Hidden for text-only questions (takeRenderQuestion controls it). -->
+      <div id="takeQImageWrap" hidden>
+        <img id="takeQImage" class="take-qimg" alt="Question figure">
+        <p class="muted small take-img-error" id="takeQImageError" hidden>Figure could not load. Tap to retry.</p>
+      </div>
       <div id="takeOptions"></div>
       <div id="takeSolution" class="take-solution" hidden></div>
       <div class="take-nav">
@@ -161,6 +167,15 @@
         <h3>Test paused</h3>
         <p class="muted small" id="takePauseSummary"></p>
         <button class="btn-primary btn-glass-color" id="takeResumeBtn" type="button">Resume Test</button>
+      </div>
+    </div>
+
+    <!-- v1.0.22: image system — tap any question/option/review image to
+         see it fullscreen. Close button or backdrop tap closes it. -->
+    <div class="dialog-overlay take-img-overlay" id="takeImgOverlay" hidden>
+      <div class="dialog-card take-img-full-card">
+        <img id="takeImgFull" alt="">
+        <button class="btn-primary btn-glass-color" id="takeImgCloseBtn" type="button">Close</button>
       </div>
     </div>
 

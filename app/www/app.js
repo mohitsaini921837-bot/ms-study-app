@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 22;
+var CURRENT_VERSION_CODE = 23;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -1633,6 +1633,25 @@ function takeRenderQuestion() {
   var qEl = $('takeQuestion');
   qEl.style.fontSize = (17 + st.zoomLevel * 2) + 'px';
   qEl.textContent = q.question || '';
+  // v1.0.22: image system — question figure above the stem when present.
+  // Text-only questions hide the wrap, so the layout is byte-identical.
+  var qImgWrap = $('takeQImageWrap');
+  var qImg = $('takeQImage');
+  var qImgErr = $('takeQImageError');
+  if (qImgWrap && qImg) {
+    if (q.question_image_url) {
+      qImgWrap.hidden = false;
+      if (qImgErr) { qImgErr.hidden = true; }
+      if (qImg.getAttribute('src') !== q.question_image_url) { qImg.src = q.question_image_url; }
+      qImg.onerror = function () { if (qImgErr) { qImgErr.hidden = false; } };
+      qImg.onload = function () { if (qImgErr) { qImgErr.hidden = true; } };
+    } else {
+      qImgWrap.hidden = true;
+      qImg.removeAttribute('src');
+      qImg.onerror = null;
+      qImg.onload = null;
+    }
+  }
   var letters = ['A', 'B', 'C', 'D'];
   var html = '';
   // v1.0.20: practice mode — instant result. Once answered, the correct
@@ -1646,8 +1665,17 @@ function takeRenderQuestion() {
       if (i === correctIdx) { cls += ' correct'; }
       else if (i === st.answers[st.idx]) { cls += ' wrong'; }
     } else if (st.answers[st.idx] === i) { cls += ' selected'; }
-    html += '<button type="button" class="' + cls +
-      '" data-opt="' + i + '" style="font-size:' + (15 + st.zoomLevel * 2) + 'px">' + esc(letters[i] + '. ' + (opt || '')) + '</button>';
+    // v1.0.22: image system — an option with a figure renders the image
+    // (tapping the image zooms it; tapping the rest of the button selects
+    // it). Text options render exactly as before.
+    var optImg = (q.option_image_urls && q.option_image_urls[i]) || null;
+    if (optImg) {
+      html += '<button type="button" class="' + cls + ' take-option-img" data-opt="' + i +
+        '" style="font-size:' + (15 + st.zoomLevel * 2) + 'px"><span class="take-opt-letter">' + letters[i] + '.</span><img class="take-optimg" src="' + esc(optImg) + '" alt="Option ' + letters[i] + ' figure" data-img="' + esc(optImg) + '"></button>';
+    } else {
+      html += '<button type="button" class="' + cls +
+        '" data-opt="' + i + '" style="font-size:' + (15 + st.zoomLevel * 2) + 'px">' + esc(letters[i] + '. ' + (opt || '')) + '</button>';
+    }
   });
   $('takeOptions').innerHTML = html;
   // v1.0.20: practice mode — the book solution appears below the options
@@ -1873,12 +1901,17 @@ function takeReviewHtml(questions, answers, marked) {
     }
     html += '<div class="take-review-item">' +
       '<p class="take-review-q">' + esc((i + 1) + '. ' + (q.question || '')) + '</p>' +
+      // v1.0.22: image system — question figure, option thumbnails on the
+      // answer lines, and the solution figure (all tap-to-zoom via the
+      // delegated takeReview click handler below). Null for text questions.
+      (q.question_image_url ? '<img class="take-review-img" src="' + esc(q.question_image_url) + '" alt="Question figure" data-img="' + esc(q.question_image_url) + '">' : '') +
       '<p class="take-review-line ' + (ok ? 'take-correct' : 'take-wrong') + '">' +
       (ok ? '✓ Correct' : (chosen === -1 ? '– Not attempted' : '✗ Wrong')) + '</p>' +
       (isMarked ? '<p class="take-review-line take-marked-tag">★ Marked for review</p>' : '') +
-      '<p class="take-review-line">Your answer: ' + esc(chosen === -1 ? 'Not answered' : (letters[chosen] + '. ' + ((q.options || [])[chosen] || ''))) + '</p>' +
-      '<p class="take-review-line">Correct answer: ' + esc(correct === -1 ? '—' : (letters[correct] + '. ' + ((q.options || [])[correct] || ''))) + '</p>' +
+      '<p class="take-review-line">Your answer: ' + esc(chosen === -1 ? 'Not answered' : (letters[chosen] + '. ' + ((q.options || [])[chosen] || ''))) + ((chosen !== -1 && q.option_image_urls && q.option_image_urls[chosen]) ? ' <img class="take-review-optimg" src="' + esc(q.option_image_urls[chosen]) + '" alt="Your answer figure" data-img="' + esc(q.option_image_urls[chosen]) + '">' : '') + '</p>' +
+      '<p class="take-review-line">Correct answer: ' + esc(correct === -1 ? '—' : (letters[correct] + '. ' + ((q.options || [])[correct] || ''))) + ((correct !== -1 && q.option_image_urls && q.option_image_urls[correct]) ? ' <img class="take-review-optimg" src="' + esc(q.option_image_urls[correct]) + '" alt="Correct answer figure" data-img="' + esc(q.option_image_urls[correct]) + '">' : '') + '</p>' +
       (q.explanation ? '<p class="take-review-line take-explain">' + esc(q.explanation) + '</p>' : '') +
+      (q.solution_image_url ? '<img class="take-review-img" src="' + esc(q.solution_image_url) + '" alt="Solution figure" data-img="' + esc(q.solution_image_url) + '">' : '') +
       '</div>';
   });
   return html || '<p class="muted">No questions in this filter.</p>';
@@ -1990,6 +2023,10 @@ async function viewSavedResult(testId, attempt) {
 }
 
 $('takeOptions').addEventListener('click', function (ev) {
+  // v1.0.22: image system — tapping an option image zooms it instead of
+  // selecting the option (works even after a practice question locks).
+  var img = ev.target.closest('[data-img]');
+  if (img) { takeOpenImg(img.getAttribute('data-img')); return; }
   var b = ev.target.closest('[data-opt]');
   if (!b || !takeState || takeState.submitted) { return; }
   // v1.0.20: in practice mode a question locks after the first tap —
@@ -2121,6 +2158,36 @@ function takeResume() {
 }
 $('takePauseBtn').addEventListener('click', takePause);
 $('takeResumeBtn').addEventListener('click', takeResume);
+
+/* v1.0.22: image system — fullscreen image overlay. Tapping a question,
+ * option or review image opens it; Close (or the backdrop) closes it.
+ * The back stack treats it like the pause overlay (pushBack/removeBackEntry). */
+function takeOpenImg(src) {
+  if (!src) { return; }
+  var full = $('takeImgFull');
+  if (full) { full.src = src; }
+  var ov = $('takeImgOverlay');
+  if (ov) { ov.hidden = false; }
+  pushBack({ kind: 'takeimg', undo: takeCloseImg });
+}
+function takeCloseImg() {
+  var ov = $('takeImgOverlay');
+  if (ov) { ov.hidden = true; }
+  removeBackEntry('takeimg');
+}
+$('takeImgCloseBtn').addEventListener('click', takeCloseImg);
+$('takeImgOverlay').addEventListener('click', function (ev) {
+  if (ev.target === this) { takeCloseImg(); }
+});
+$('takeQImage').addEventListener('click', function () { takeOpenImg(this.src); });
+$('takeQImageError').addEventListener('click', function () {
+  var im = $('takeQImage');
+  if (im && im.getAttribute('src')) { im.src = im.getAttribute('src'); }
+});
+$('takeReview').addEventListener('click', function (ev) {
+  var img = ev.target.closest('[data-img]');
+  if (img) { takeOpenImg(img.getAttribute('data-img')); }
+});
 
 $('takeReviewFilters').addEventListener('click', function (ev) {
   var b = ev.target.closest('[data-review-filter]');
