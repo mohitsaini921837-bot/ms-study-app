@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 20;
+var CURRENT_VERSION_CODE = 21;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -102,7 +102,7 @@ async function getDeviceInfo() {
 
 /* ================= Screens / router ================= */
 var MAIN_SCREENS = ['screen-notes', 'screen-tests', 'screen-practice', 'screen-admin'];
-var ALL_SCREENS = MAIN_SCREENS.concat(['screen-lock', 'screen-chat-lock', 'screen-chat', 'screen-take', 'screen-test-subjects', 'screen-test-chapters', 'screen-test-list']);
+var ALL_SCREENS = MAIN_SCREENS.concat(['screen-lock', 'screen-chat-lock', 'screen-chat', 'screen-take', 'screen-test-subjects', 'screen-test-chapters', 'screen-test-list', 'screen-practice-subjects', 'screen-practice-chapters', 'screen-practice-list']);
 
 var currentScreenId = 'screen-notes'; // FIX 10 (v1.0.12): tracked for live refresh
 
@@ -122,7 +122,7 @@ function showScreen(id) {
   // Lazy-load the screen's data when it is shown (FIX 10: every tab
   // switch re-fetches, so a change from another device appears at once).
   if (id === 'screen-notes') { notesBrowser.load(); }
-  else if (id === 'screen-practice') { practiceBrowser.load(); }
+  else if (id === 'screen-practice') { practiceBrowser.load(); refreshPracticeSets(); }
   else if (id === 'screen-tests') { refreshTestsScreen(); }
   else if (id === 'screen-admin') { refreshAdminPasswords(); }
 }
@@ -152,8 +152,13 @@ document.querySelectorAll('.nav-btn').forEach(function (btn) {
  * next success — never an error to the user for a background poll. */
 function refreshCurrentScreen(silent) {
   if (currentScreenId === 'screen-notes') { return notesBrowser.load(silent); }
-  if (currentScreenId === 'screen-practice') { return practiceBrowser.load(silent); }
+  if (currentScreenId === 'screen-practice') { refreshPracticeSets(silent); return practiceBrowser.load(silent); }
   if (currentScreenId === 'screen-tests') { return refreshSavedTests(silent); }
+  // v1.0.20: on a practice sub-page, re-fetch the practice sets silently
+  // and re-render this page from the fresh cache.
+  if (currentScreenId === 'screen-practice-subjects' || currentScreenId === 'screen-practice-chapters' || currentScreenId === 'screen-practice-list') {
+    return refreshPracticeSets(true).then(function () { rerenderPracticeSubPage(); }).catch(function () { /* silent */ });
+  }
   // v1.0.18: on a test sub-page, re-fetch the tests silently and
   // re-render this page from the fresh cache.
   if (currentScreenId === 'screen-test-subjects' || currentScreenId === 'screen-test-chapters' || currentScreenId === 'screen-test-list') {
@@ -255,6 +260,17 @@ function goBackByState() {
     else { showScreen('screen-tests'); }
     return;
   }
+  // v1.0.20: practice navigation sub-pages — back to the parent page.
+  if (currentScreenId === 'screen-practice-subjects') { showScreen('screen-practice'); return; }
+  if (currentScreenId === 'screen-practice-chapters') {
+    renderPracticeSubjects(practiceNav.exam); showScreen('screen-practice-subjects'); return;
+  }
+  if (currentScreenId === 'screen-practice-list') {
+    if (practiceNav.chapter) { renderPracticeChapters(practiceNav.subject); showScreen('screen-practice-chapters'); }
+    else if (practiceNav.subject) { renderPracticeSubjects(practiceNav.exam); showScreen('screen-practice-subjects'); }
+    else { showScreen('screen-practice'); }
+    return;
+  }
   if (currentScreenId === 'screen-chat' || currentScreenId === 'screen-chat-lock') { stopChat(); showScreen('screen-notes'); return; }
   // 3. Folder / section back, one level (state-based).
   if (currentScreenId === 'screen-notes' || currentScreenId === 'screen-practice') {
@@ -268,6 +284,19 @@ function goBackByState() {
 function exitTakeScreen() {
   stopTakeTimer();
   takeState = null;
+  // v1.0.20: return to the practice list this set was opened from.
+  if (takeReturnContext && takeReturnContext.mode === 'practice') {
+    var pctx = takeReturnContext;
+    takeReturnContext = null;
+    practiceNav = { exam: pctx.exam, subject: pctx.subject, chapter: pctx.chapter };
+    if (pctx.chapter) {
+      renderPracticeList(practiceForChapter(pctx.exam, pctx.subject, pctx.chapter), pctx.chapter);
+    } else if (pctx.subject) {
+      renderPracticeList(practiceForSubject(pctx.exam, pctx.subject), pctx.subject);
+    }
+    showScreen('screen-practice-list');
+    return;
+  }
   // v1.0.18: return to the test list this test was opened from.
   if (takeReturnContext) {
     var ctx = takeReturnContext;
@@ -1110,7 +1139,10 @@ function isChapterTest(t) {
 }
 function tabTests() {
   var tab = window.__testsTab || 'chapter';
+  // v1.0.20: belt-and-braces — practice sets never leak into the Tests
+  // tab (the server also defaults /tests/list to kind "notes").
   return allTestsCache.filter(function (t) {
+    if ((t.kind || 'notes') === 'practice') { return false; }
     return tab === 'chapter' ? isChapterTest(t) : !isChapterTest(t);
   });
 }
@@ -1202,8 +1234,12 @@ function renderTestChapters(subject) {
 
 function testCardHtml(t) {
   var lang = (t.language === 'hi') ? 'Hindi' : (t.language === 'en') ? 'English' : (t.language || '');
-  var meta = (t.question_count || '') + ' questions · ' + (t.duration_min || '') + ' min' +
-    (lang ? ' · ' + lang : '');
+  // v1.0.20: practice sets have duration_min 0 (no timer) — never show "0 min".
+  var parts = [];
+  if (t.question_count) { parts.push(t.question_count + ' questions'); }
+  if (t.duration_min) { parts.push(t.duration_min + ' min'); }
+  if (lang) { parts.push(lang); }
+  var meta = parts.join(' · ');
   return '<div class="test-card" data-test="' + esc(t.id) + '">' +
     '<span class="test-card-title">' + esc(t.title || 'Test') + '</span>' +
     '<span class="test-card-meta">' + esc(meta) + '</span>' +
@@ -1220,10 +1256,14 @@ function testCardActionsHtml(testId, hasAttempt) {
     '<button type="button" class="btn-primary btn-glass-color test-act-btn" data-act="reattempt" data-test="' + esc(testId) + '">Re-attempt</button>';
 }
 
-function renderTestList(tests, title) {
-  $('testListTitle').textContent = title;
-  var listEl = $('testList');
-  var detailEl = $('testListDetail');
+/* v1.0.20: parameterised so the practice list reuses the same cards
+ * (Attempt / Result + Re-attempt come free). ids defaults to the test
+ * list elements; practice passes its own. */
+function renderTestList(tests, title, ids) {
+  ids = ids || { title: 'testListTitle', list: 'testList', detail: 'testListDetail' };
+  $(ids.title).textContent = title;
+  var listEl = $(ids.list);
+  var detailEl = $(ids.detail);
   if (detailEl) { detailEl.textContent = ''; }
   if (!tests.length) { listEl.innerHTML = '<p class="muted">No tests.</p>'; return; }
   listEl.innerHTML = tests.map(testCardHtml).join('');
@@ -1362,6 +1402,188 @@ $('testList').addEventListener('click', function (ev) {
     });
   }
 });
+/* ================= Practice screen: question sets (v1.0.20) ================
+ * Practice → Exam (UPSI) → Subject (Reasoning) → Chapter (Analogy) →
+ * practice set list. Mirrors the test navigation page-for-page.
+ * The sets come from /tests/list with kind "practice" — the same
+ * ms_tests / ms_questions rows as tests, only the kind differs.
+ * The Drive-file browser (practiceBrowser) stays BELOW the tree on the
+ * same screen, untouched. */
+var allPracticeCache = [];
+var practiceNav = { exam: null, subject: null, chapter: null };
+
+function practiceExamOf(t) {
+  return (t.exam || 'UPSI').toString();
+}
+function practiceCategoryOf(t) {
+  return (t.category || 'Practice').toString();
+}
+function practiceChapterOf(t) {
+  return (t.chapter || '').toString();
+}
+function practiceForExam(exam) {
+  return allPracticeCache.filter(function (t) { return practiceExamOf(t) === exam; });
+}
+function practiceForSubject(exam, subject) {
+  return practiceForExam(exam).filter(function (t) { return practiceCategoryOf(t) === subject; });
+}
+function practiceChaptersForSubject(exam, subject) {
+  return uniqueSorted(practiceForSubject(exam, subject).map(function (t) { return practiceChapterOf(t); }).filter(function (c) { return !!c; }));
+}
+function practiceForChapter(exam, subject, chapter) {
+  return practiceForSubject(exam, subject).filter(function (t) { return practiceChapterOf(t) === chapter; });
+}
+
+async function refreshPracticeSets(silent) {
+  var list = $('practiceSetList');
+  if (!list) { return; }
+  if (!silent) {
+    list.innerHTML = '<p class="muted">Loading…</p>';
+    var det = $('practiceSetDetail');
+    if (det) { det.textContent = ''; }
+  }
+  try {
+    var data = await apiCall('/tests/list', { kind: 'practice' });
+    var sets = (data && data.tests) || [];
+    allPracticeCache = sets;
+    if (!sets.length) { list.innerHTML = '<p class="muted">No practice sets yet.</p>'; return; }
+    var exams = uniqueSorted(sets.map(function (t) { return practiceExamOf(t); }));
+    list.innerHTML = exams.map(function (ex) { return navRowHtml(ex, 'data-practice-exam', ex); }).join('');
+    // Per-set last-attempt checks (a silent poll skips them — the attempt
+    // state is already known from the initial load). Reuses the shared
+    // savedAttempts / lastAttemptChecked maps (test ids are unique).
+    if (silent) { return; }
+    sets.forEach(function (t) {
+      apiCall('/tests/last-attempt', { testId: t.id }).then(function (d) {
+        lastAttemptChecked[t.id] = true;
+        if (d && d.attempt) { savedAttempts[t.id] = d.attempt; }
+      }).catch(function () { lastAttemptChecked[t.id] = true; });
+    });
+  } catch (e) {
+    if (!silent) {
+      list.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
+    }
+    if (silent) { throw e; }
+  }
+}
+
+function renderPracticeSubjects(exam) {
+  var subjects = uniqueSorted(practiceForExam(exam).map(function (t) { return practiceCategoryOf(t); }));
+  $('practiceSubjectsTitle').textContent = exam;
+  $('practiceSubjectList').innerHTML = subjects.length
+    ? subjects.map(function (s) { return navRowHtml(s, 'data-practice-subject', s); }).join('')
+    : '<p class="muted">No subjects.</p>';
+}
+
+function renderPracticeChapters(subject) {
+  var chapters = practiceChaptersForSubject(practiceNav.exam, subject);
+  $('practiceChaptersTitle').textContent = subject;
+  $('practiceChapterList').innerHTML = chapters.length
+    ? chapters.map(function (c) { return navRowHtml(c, 'data-practice-chapter', c); }).join('')
+    : '<p class="muted">No chapters.</p>';
+}
+
+function renderPracticeList(tests, title) {
+  renderTestList(tests, title, { title: 'practiceListTitle', list: 'practiceList', detail: 'practiceListDetail' });
+}
+
+function rerenderPracticeSubPage() {
+  if (currentScreenId === 'screen-practice-subjects' && practiceNav.exam) { renderPracticeSubjects(practiceNav.exam); return; }
+  if (currentScreenId === 'screen-practice-chapters' && practiceNav.subject) { renderPracticeChapters(practiceNav.subject); return; }
+  if (currentScreenId === 'screen-practice-list') {
+    if (practiceNav.subject && practiceNav.chapter) {
+      renderPracticeList(practiceForChapter(practiceNav.exam, practiceNav.subject, practiceNav.chapter), practiceNav.chapter);
+    } else if (practiceNav.subject) {
+      renderPracticeList(practiceForSubject(practiceNav.exam, practiceNav.subject), practiceNav.subject);
+    }
+    return;
+  }
+}
+
+function openPracticeExam(exam) {
+  practiceNav = { exam: exam, subject: null, chapter: null };
+  renderPracticeSubjects(exam);
+  showScreen('screen-practice-subjects');
+  pushBack({ kind: 'practicnav', undo: function () { showScreen('screen-practice'); } });
+}
+
+function openPracticeSubject(subject) {
+  practiceNav.subject = subject;
+  practiceNav.chapter = null;
+  // Practice sets are chapter-wise: subject → chapters page. If a set
+  // ever has no chapter, go straight to its list instead.
+  if (practiceChaptersForSubject(practiceNav.exam, subject).length) {
+    renderPracticeChapters(subject);
+    showScreen('screen-practice-chapters');
+    pushBack({ kind: 'practicnav', undo: function () { renderPracticeSubjects(practiceNav.exam); showScreen('screen-practice-subjects'); } });
+  } else {
+    takeReturnContext = { mode: 'practice', screen: 'screen-practice-list', exam: practiceNav.exam, subject: subject, chapter: null };
+    renderPracticeList(practiceForSubject(practiceNav.exam, subject), subject);
+    showScreen('screen-practice-list');
+    pushBack({ kind: 'practicnav', undo: function () { renderPracticeSubjects(practiceNav.exam); showScreen('screen-practice-subjects'); } });
+  }
+}
+
+function openPracticeChapter(chapter) {
+  practiceNav.chapter = chapter;
+  takeReturnContext = { mode: 'practice', screen: 'screen-practice-list', exam: practiceNav.exam, subject: practiceNav.subject, chapter: chapter };
+  renderPracticeList(practiceForChapter(practiceNav.exam, practiceNav.subject, chapter), chapter);
+  showScreen('screen-practice-list');
+  pushBack({ kind: 'practicnav', undo: function () { renderPracticeChapters(practiceNav.subject); showScreen('screen-practice-chapters'); } });
+}
+
+/* Back buttons on the practice sub-pages — same as the system back button. */
+$('practiceSubjectsBackBtn').addEventListener('click', goBackOneStep);
+$('practiceChaptersBackBtn').addEventListener('click', goBackOneStep);
+$('practiceListBackBtn').addEventListener('click', goBackOneStep);
+
+$('practiceSetList').addEventListener('click', function (ev) {
+  var ex = ev.target.closest('[data-practice-exam]');
+  if (!ex) { return; }
+  openPracticeExam(ex.getAttribute('data-practice-exam'));
+});
+
+$('practiceSubjectList').addEventListener('click', function (ev) {
+  var s = ev.target.closest('[data-practice-subject]');
+  if (!s) { return; }
+  openPracticeSubject(s.getAttribute('data-practice-subject'));
+});
+
+$('practiceChapterList').addEventListener('click', function (ev) {
+  var c = ev.target.closest('[data-practice-chapter]');
+  if (!c) { return; }
+  openPracticeChapter(c.getAttribute('data-practice-chapter'));
+});
+
+$('practiceList').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-act]');
+  if (!b) { return; }
+  var testId = b.getAttribute('data-test');
+  var act = b.getAttribute('data-act');
+  if (act === 'attempt' || act === 'reattempt') {
+    openPracticeSet(testId);
+    return;
+  }
+  if (act === 'result') {
+    var attempt = savedAttempts[testId];
+    if (attempt) { viewSavedResult(testId, attempt); return; }
+    var detailEl = $('practiceListDetail');
+    if (detailEl) { detailEl.textContent = 'Loading…'; }
+    apiCall('/tests/last-attempt', { testId: testId }).then(function (d) {
+      lastAttemptChecked[testId] = true;
+      if (detailEl) { detailEl.textContent = ''; }
+      if (d && d.attempt) {
+        savedAttempts[testId] = d.attempt;
+        viewSavedResult(testId, d.attempt);
+      } else if (detailEl) {
+        detailEl.textContent = 'No result yet.';
+      }
+    }).catch(function (e) {
+      if (detailEl) { detailEl.textContent = e.message || 'Try again.'; }
+    });
+  }
+});
+
 /* v1.0.14 (user order 2026-11-25): AI test generation removed — the
  * form, its listeners and the /tests/generate call are all gone. Tests
  * are uploaded manually now and visible to everyone. */
@@ -1386,6 +1608,8 @@ function stopTakeTimer() {
 function takeRenderTimer() {
   var el = $('takeTimer');
   if (!el || !takeState) { return; }
+  // v1.0.20: practice sets have no timer (remainingSec null) — blank.
+  if (takeState.remainingSec == null) { el.textContent = ''; return; }
   el.textContent = 'Time left: ' + takeFormatTime(Math.max(0, takeState.remainingSec));
   el.classList.toggle('take-timer-low', takeState.remainingSec <= 60);
 }
@@ -1406,14 +1630,37 @@ function takeRenderQuestion() {
   qEl.textContent = q.question || '';
   var letters = ['A', 'B', 'C', 'D'];
   var html = '';
+  // v1.0.20: practice mode — instant result. Once answered, the correct
+  // option goes green, a wrong chosen option goes red, and the question
+  // locks (the tap handler ignores further taps on it).
+  var practiceAnswered = (st.mode === 'practice' && st.answers[st.idx] !== -1);
+  var correctIdx = (typeof q.answer_index === 'number') ? q.answer_index : -1;
   (q.options || []).forEach(function (opt, i) {
-    html += '<button type="button" class="take-option' + (st.answers[st.idx] === i ? ' selected' : '') +
+    var cls = 'take-option';
+    if (practiceAnswered) {
+      if (i === correctIdx) { cls += ' correct'; }
+      else if (i === st.answers[st.idx]) { cls += ' wrong'; }
+    } else if (st.answers[st.idx] === i) { cls += ' selected'; }
+    html += '<button type="button" class="' + cls +
       '" data-opt="' + i + '" style="font-size:' + (15 + st.zoomLevel * 2) + 'px">' + esc(letters[i] + '. ' + (opt || '')) + '</button>';
   });
   $('takeOptions').innerHTML = html;
+  // v1.0.20: practice mode — the book solution appears below the options
+  // as soon as an option is tapped.
+  var solEl = $('takeSolution');
+  if (solEl) {
+    if (practiceAnswered) {
+      solEl.hidden = false;
+      solEl.innerHTML = '<p class="take-review-line"><strong>Solution</strong></p>' +
+        '<p class="take-review-line take-explain">' + esc(q.explanation || 'No solution.') + '</p>';
+    } else {
+      solEl.hidden = true;
+      solEl.innerHTML = '';
+    }
+  }
   $('takePrevBtn').disabled = (st.idx === 0);
   var last = (st.idx === st.questions.length - 1);
-  $('takeNextBtn').textContent = last ? 'Submit' : 'Next';
+  $('takeNextBtn').textContent = last ? (st.mode === 'practice' ? 'Finish' : 'Submit') : 'Next';
   // v1.0.15: Mark for Review button shows the current state.
   $('takeMarkBtn').textContent = st.marked[st.idx] ? 'Unmark Review' : 'Mark for Review';
   // Palette stays live: if it is open, refresh it as the current question
@@ -1422,7 +1669,12 @@ function takeRenderQuestion() {
   if (pal && !pal.hidden) { takeRenderPalette(); }
 }
 
-async function openTest(testId) {
+/* v1.0.20: opts.mode "practice" opens a practice set — no timer, no
+ * negative marking, instant result on every tap (see takeRenderQuestion).
+ * openPracticeSet() is the practice entry point (same questions endpoint). */
+async function openTest(testId, opts) {
+  opts = opts || {};
+  var mode = (opts.mode === 'practice') ? 'practice' : 'test';
   $('testDetail').textContent = 'Loading…';
   try {
     var data = await apiCall('/tests/questions', { testId: testId });
@@ -1433,6 +1685,7 @@ async function openTest(testId) {
     // v1.0.15: negative marking — 0.25 per wrong answer (Vidyagram
     // standard: 25%). Marks per question = total marks / questions
     // (usually 1). Score = correct*marksPerQ - wrong*negativePerQ.
+    // v1.0.20: practice sets — 1 mark per question, no negative marking.
     var totalMarks = (typeof test.total_marks === 'number') ? test.total_marks : questions.length;
     var marksPerQ = questions.length ? Math.round((totalMarks / questions.length) * 100) / 100 : 1;
     if (!marksPerQ || marksPerQ <= 0) { marksPerQ = 1; }
@@ -1444,15 +1697,28 @@ async function openTest(testId) {
       marked: questions.map(function () { return false; }),
       zoomLevel: 0,
       paused: false,
-      marksPerQ: marksPerQ,
-      negativePerQ: Math.round(marksPerQ * 0.25 * 100) / 100,
-      remainingSec: Math.max(1, (parseInt(test.duration_min, 10) || 10) * 60),
+      mode: mode,
+      marksPerQ: (mode === 'practice') ? 1 : marksPerQ,
+      negativePerQ: (mode === 'practice') ? 0 : Math.round(marksPerQ * 0.25 * 100) / 100,
+      remainingSec: (mode === 'practice') ? null : Math.max(1, (parseInt(test.duration_min, 10) || 10) * 60),
       timer: null,
       submitted: false,
       startedAt: null
     };
     $('takeTitle').textContent = test.title || 'Test';
-    $('takeIntroDetail').textContent = 'Duration: ' + (parseInt(test.duration_min, 10) || 10) + ' minutes · Questions: ' + questions.length + ' · Marks: ' + totalMarks + ' · Negative marking: 25% per wrong answer.';
+    $('takeIntroDetail').textContent = (mode === 'practice')
+      ? 'Practice set · Questions: ' + questions.length + ' · No timer · Tap an option to see the answer and solution at once.'
+      : 'Duration: ' + (parseInt(test.duration_min, 10) || 10) + ' minutes · Questions: ' + questions.length + ' · Marks: ' + totalMarks + ' · Negative marking: 25% per wrong answer.';
+    // v1.0.20: practice mode hides the timer, the pause button and the
+    // test-only intro bullets; Submit becomes Finish; Clear is disabled
+    // (a practice answer locks the moment it is tapped).
+    var testOnlyBullets = document.querySelectorAll('.take-intro-testonly');
+    testOnlyBullets.forEach(function (el) { el.hidden = (mode === 'practice'); });
+    $('takeTimer').hidden = (mode === 'practice');
+    $('takePauseBtn').hidden = (mode === 'practice');
+    $('takeSubmitBtn').textContent = (mode === 'practice') ? 'Finish' : 'Submit';
+    $('takeDoneBtn').textContent = (mode === 'practice') ? 'Back to practice' : 'Back to tests';
+    $('takeClearBtn').disabled = (mode === 'practice');
     $('takeIntro').hidden = false;
     $('takeBody').hidden = true;
     $('takeResult').hidden = true;
@@ -1467,6 +1733,11 @@ async function openTest(testId) {
   }
 }
 
+/* v1.0.20: practice entry point — openTest with mode "practice". */
+function openPracticeSet(testId) {
+  return openTest(testId, { mode: 'practice' });
+}
+
 /* v1.0.15: the timer starts only when "I am ready to begin" is tapped
  * (Vidyagram-style instructions screen). */
 function startTakeTest() {
@@ -1476,6 +1747,8 @@ function startTakeTest() {
   $('takeIntro').hidden = true;
   $('takeBody').hidden = false;
   takeRenderQuestion();
+  // v1.0.20: practice sets have no timer — no countdown interval.
+  if (st.mode === 'practice') { return; }
   st.timer = setInterval(function () {
     if (!takeState || takeState.submitted || takeState.paused) { return; }
     takeState.remainingSec -= 1;
@@ -1561,7 +1834,8 @@ function takeSummaryHtml(detail) {
   var unattempted = (typeof d.unattempted === 'number') ? d.unattempted : 0;
   var html = '<div class="take-summary">' +
     '<p class="take-summary-big">Score: ' + score + ' / ' + total + '</p>' +
-    '<div class="take-summary-row"><span>Time taken</span><span>' + esc(takeFormatTime(Math.max(0, timeSec))) + '</span></div>' +
+    // v1.0.20: practice sets have no timer — hide the Time row.
+    (d.hideTime ? '' : '<div class="take-summary-row"><span>Time taken</span><span>' + esc(takeFormatTime(Math.max(0, timeSec))) + '</span></div>') +
     '<div class="take-summary-row"><span class="take-correct">Correct</span><span class="take-correct">' + correct + '</span></div>' +
     '<div class="take-summary-row"><span class="take-wrong">Wrong</span><span class="take-wrong">' + wrong + '</span></div>' +
     '<div class="take-summary-row"><span>Unattempted</span><span>' + unattempted + '</span></div>' +
@@ -1647,7 +1921,8 @@ function submitTake() {
     timeTakenSec: timeTakenSec,
     correct: counts.correct,
     wrong: counts.wrong,
-    unattempted: counts.unattempted
+    unattempted: counts.unattempted,
+    hideTime: (st.mode === 'practice')
   };
   $('takeSummary').innerHTML = takeSummaryHtml(detail);
   $('takeScore').textContent = 'You scored ' + score + ' out of ' + st.questions.length + '.';
@@ -1683,8 +1958,12 @@ async function viewSavedResult(testId, attempt) {
       correct: (typeof attempt.correct_count === 'number') ? attempt.correct_count : counts.correct,
       wrong: (typeof attempt.wrong_count === 'number') ? attempt.wrong_count : counts.wrong,
       unattempted: (typeof attempt.unattempted_count === 'number') ? attempt.unattempted_count : counts.unattempted,
-      when: when
+      when: when,
+      // v1.0.20: a saved practice result hides the Time row too.
+      hideTime: (test.kind === 'practice')
     };
+    // v1.0.20: result view of a practice set goes back to Practice.
+    $('takeDoneBtn').textContent = (test.kind === 'practice') ? 'Back to practice' : 'Back to tests';
     stopTakeTimer();
     takeState = null;
     $('takeTitle').textContent = test.title || 'Test';
@@ -1708,6 +1987,9 @@ async function viewSavedResult(testId, attempt) {
 $('takeOptions').addEventListener('click', function (ev) {
   var b = ev.target.closest('[data-opt]');
   if (!b || !takeState || takeState.submitted) { return; }
+  // v1.0.20: in practice mode a question locks after the first tap —
+  // the instant result is already showing, so further taps do nothing.
+  if (takeState.mode === 'practice' && takeState.answers[takeState.idx] !== -1) { return; }
   takeState.answers[takeState.idx] = parseInt(b.getAttribute('data-opt'), 10);
   takeRenderQuestion();
 });
@@ -1797,6 +2079,8 @@ $('takeMarkBtn').addEventListener('click', function () {
 
 $('takeClearBtn').addEventListener('click', function () {
   if (!takeState || takeState.submitted) { return; }
+  // v1.0.20: Clear is disabled in practice mode (answers lock on tap).
+  if (takeState.mode === 'practice') { return; }
   takeState.answers[takeState.idx] = -1;
   takeRenderQuestion();
 });
@@ -1815,6 +2099,8 @@ $('takeZoomOutBtn').addEventListener('click', function () {
 
 function takePause() {
   if (!takeState || takeState.submitted || takeState.paused) { return; }
+  // v1.0.20: no pause in practice mode (there is no timer to freeze).
+  if (takeState.mode === 'practice') { return; }
   takeState.paused = true;
   var answered = 0;
   takeState.answers.forEach(function (a) { if (a !== -1) { answered += 1; } });

@@ -125,8 +125,8 @@
         <p class="muted small">• Answer each question, then tap Next. You can go back with Previous.</p>
         <p class="muted small">• Tap an option again to clear it, or use Clear.</p>
         <p class="muted small">• Mark for Review flags a question to come back to — it still counts as answered if you answered it.</p>
-        <p class="muted small">• Wrong answers lose marks (negative marking). The test auto-submits when the time ends.</p>
-        <p class="muted small">• You can pause the test — the timer freezes while paused.</p>
+        <p class="muted small take-intro-testonly">• Wrong answers lose marks (negative marking). The test auto-submits when the time ends.</p>
+        <p class="muted small take-intro-testonly">• You can pause the test — the timer freezes while paused.</p>
         <button class="btn-primary btn-glass-color" id="takeStartBtn" type="button">I am ready to begin</button>
       </div>
     </div>
@@ -145,6 +145,7 @@
       <p class="muted small" id="takeAnsweredCount"></p>
       <p id="takeQuestion"></p>
       <div id="takeOptions"></div>
+      <div id="takeSolution" class="take-solution" hidden></div>
       <div class="take-nav">
         <button class="btn-secondary" id="takePrevBtn" type="button">Previous</button>
         <button class="btn-secondary" id="takeClearBtn" type="button">Clear</button>
@@ -181,9 +182,49 @@
   <!-- ================= Practice ================= -->
   <section class="screen" id="screen-practice" hidden>
     <div class="section-head"><h2>Practice</h2></div>
+    <div class="card">
+      <h3>Question Sets</h3>
+      <div id="practiceSetList"></div>
+      <p class="muted small" id="practiceSetDetail"></p>
+    </div>
     <div class="crumb" id="practiceCrumb"></div>
     <div class="browser-create" id="practiceCreate" hidden></div>
     <div id="practiceList"></div>
+  </section>
+
+  <!-- ================= Practice sub-pages (v1.0.20, mirror of the test pages) ================= -->
+  <section class="screen" id="screen-practice-subjects" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="practiceSubjectsBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="practiceSubjectsTitle"></h2>
+    <div class="card">
+      <h3>Subjects</h3>
+      <div id="practiceSubjectList"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-practice-chapters" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="practiceChaptersBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="practiceChaptersTitle"></h2>
+    <div class="card">
+      <h3>Chapters</h3>
+      <div id="practiceChapterList"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-practice-list" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="practiceListBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="practiceListTitle"></h2>
+    <div class="card">
+      <h3>Practice sets</h3>
+      <div id="practiceList"></div>
+      <p class="muted small" id="practiceListDetail"></p>
+    </div>
   </section>
 
   <!-- ================= Admin (role === 'admin' only) ================= -->
