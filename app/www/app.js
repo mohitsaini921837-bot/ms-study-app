@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 17;
+var CURRENT_VERSION_CODE = 18;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -1062,10 +1062,19 @@ async function refreshSavedTests(silent) {
     var data = await apiCall('/tests/list', {});
     var tests = (data && data.tests) || [];
     if (tests.length === 0) { list.innerHTML = '<p class="muted">No tests.</p>'; return; }
-    // v1.0.16 (user order 2026-11-25): Vidyagram-like structure, THREE
-    // levels — Exam first (e.g. "Chapter Test" or "SSC CGL TIER I"),
-    // then Subject/Category (e.g. REASONING), then Chapter (e.g.
-    // Analogy), then the test cards. NOT limited to folder/section.
+    // v1.0.17 (user order 2026-11-25): Chapter Test and Sectional Test
+    // are TOP tabs on the Tests screen (not rows inside Saved tests).
+    // Chapter tab: Category → Chapter → Test. Sectional tab:
+    // Exam → Subject → Test.
+    var tab = window.__testsTab || 'chapter';
+    var tabTests = tests.filter(function (t) {
+      var isChapter = (!t.exam || t.exam === 'Chapter Test');
+      return tab === 'chapter' ? isChapter : !isChapter;
+    });
+    if (tabTests.length === 0) {
+      list.innerHTML = '<p class="muted">No tests yet.</p>';
+      return;
+    }
     var html = '';
     var testCardHtml = function (t) {
       var lang = (t.language === 'hi') ? 'Hindi' : (t.language === 'en') ? 'English' : (t.language || '');
@@ -1077,56 +1086,75 @@ async function refreshSavedTests(silent) {
         '<span class="test-card-title">' + esc(t.title || 'Test') + '</span>' +
         '<span class="test-card-meta">' + esc(meta) + '</span></button>';
     };
-    var exams = {};
-    var examOrder = [];
-    tests.forEach(function (t) {
-      var ex = (t.exam || 'Tests').toString();
-      var cat = (t.category || '').toString();
-      var chap = (t.chapter || '').toString();
-      if (!exams[ex]) { exams[ex] = { name: ex, categories: {}, catOrder: [], tests: [] }; examOrder.push(ex); }
-      if (!cat) { exams[ex].tests.push(t); return; }
-      if (!exams[ex].categories[cat]) { exams[ex].categories[cat] = { name: cat, chapters: {}, chapOrder: [], tests: [] }; exams[ex].catOrder.push(cat); }
-      if (!chap) { exams[ex].categories[cat].tests.push(t); return; }
-      if (!exams[ex].categories[cat].chapters[chap]) { exams[ex].categories[cat].chapters[chap] = { name: chap, tests: [] }; exams[ex].categories[cat].chapOrder.push(chap); }
-      exams[ex].categories[cat].chapters[chap].tests.push(t);
-    });
-    var openExam = window.__testsOpenExam || null;
-    var openCat = window.__testsOpenCat || null;
-    var openChap = window.__testsOpenChap || null;
-    examOrder.forEach(function (exName) {
-      var ex = exams[exName];
-      var exCount = ex.tests.length;
-      ex.catOrder.forEach(function (c) {
-        exCount += ex.categories[c].tests.length;
-        ex.categories[c].chapOrder.forEach(function (h) { exCount += ex.categories[c].chapters[h].tests.length; });
+    if (tab === 'chapter') {
+      // Category → Chapter → Test.
+      var cats = {};
+      var catOrder = [];
+      tabTests.forEach(function (t) {
+        var cat = (t.category || 'Tests').toString();
+        var chap = (t.chapter || '').toString();
+        if (!cats[cat]) { cats[cat] = { name: cat, chapters: {}, chapOrder: [], tests: [] }; catOrder.push(cat); }
+        if (!chap) { cats[cat].tests.push(t); return; }
+        if (!cats[cat].chapters[chap]) { cats[cat].chapters[chap] = { name: chap, tests: [] }; cats[cat].chapOrder.push(chap); }
+        cats[cat].chapters[chap].tests.push(t);
       });
-      var examOpen = (openExam === exName);
-      html += '<button type="button" class="row-item test-group-row" data-test-exam="' + esc(exName) + '">' +
-        '<span class="row-label">📁 ' + esc(exName) + '</span>' +
-        '<span class="row-count">' + exCount + ' test' + (exCount > 1 ? 's' : '') + '</span></button>';
-      if (!examOpen) { return; }
-      ex.tests.forEach(function (t) { html += testCardHtml(t); });
-      ex.catOrder.forEach(function (catName) {
-        var cat = ex.categories[catName];
+      var openCat = window.__testsOpenCat || null;
+      var openChap = window.__testsOpenChap || null;
+      catOrder.forEach(function (catName) {
+        var cat = cats[catName];
         var catCount = cat.tests.length;
         cat.chapOrder.forEach(function (h) { catCount += cat.chapters[h].tests.length; });
-        var catOpen = examOpen && (openCat === exName + '\u0000' + catName);
-        html += '<button type="button" class="row-item test-group-row test-cat-row" data-test-cat="' + esc(exName) + '\u0000' + esc(catName) + '">' +
-          '<span class="row-label">📂 ' + esc(catName) + '</span>' +
+        var catOpen = (openCat === catName);
+        html += '<button type="button" class="row-item test-group-row" data-test-cat="' + esc(catName) + '">' +
+          '<span class="row-label">📁 ' + esc(catName) + '</span>' +
           '<span class="row-count">' + catCount + ' test' + (catCount > 1 ? 's' : '') + '</span></button>';
         if (!catOpen) { return; }
         cat.tests.forEach(function (t) { html += testCardHtml(t); });
         cat.chapOrder.forEach(function (chapName) {
           var chap = cat.chapters[chapName];
-          var chapOpen = catOpen && (openChap === exName + '\u0000' + catName + '\u0000' + chapName);
-          html += '<button type="button" class="row-item test-group-row test-chapter-row" data-test-chap="' + esc(exName) + '\u0000' + esc(catName) + '\u0000' + esc(chapName) + '">' +
-            '<span class="row-label">📄 ' + esc(chapName) + '</span>' +
+          var chapOpen = catOpen && (openChap === catName + '\u0000' + chapName);
+          html += '<button type="button" class="row-item test-group-row test-chapter-row" data-test-chap="' + esc(catName) + '\u0000' + esc(chapName) + '">' +
+            '<span class="row-label">📂 ' + esc(chapName) + '</span>' +
             '<span class="row-count">' + chap.tests.length + ' test' + (chap.tests.length > 1 ? 's' : '') + '</span></button>';
           if (!chapOpen) { return; }
           chap.tests.forEach(function (t) { html += testCardHtml(t); });
         });
       });
-    });
+    } else {
+      // Sectional tab: Exam → Subject → Test.
+      var exams = {};
+      var examOrder = [];
+      tabTests.forEach(function (t) {
+        var ex = (t.exam || 'Sectional').toString();
+        var cat = (t.category || '').toString();
+        if (!exams[ex]) { exams[ex] = { name: ex, categories: {}, catOrder: [], tests: [] }; examOrder.push(ex); }
+        if (!cat) { exams[ex].tests.push(t); return; }
+        if (!exams[ex].categories[cat]) { exams[ex].categories[cat] = { name: cat, tests: [] }; exams[ex].catOrder.push(cat); }
+        exams[ex].categories[cat].tests.push(t);
+      });
+      var openExam = window.__testsOpenExam || null;
+      var openCatS = window.__testsOpenCat || null;
+      examOrder.forEach(function (exName) {
+        var ex = exams[exName];
+        var exCount = ex.tests.length;
+        ex.catOrder.forEach(function (c) { exCount += ex.categories[c].tests.length; });
+        var examOpen = (openExam === exName);
+        html += '<button type="button" class="row-item test-group-row" data-test-exam="' + esc(exName) + '">' +
+          '<span class="row-label">📁 ' + esc(exName) + '</span>' +
+          '<span class="row-count">' + exCount + ' test' + (exCount > 1 ? 's' : '') + '</span></button>';
+        if (!examOpen) { return; }
+        ex.tests.forEach(function (t) { html += testCardHtml(t); });
+        ex.catOrder.forEach(function (catName) {
+          var cat = ex.categories[catName];
+          var catOpen = examOpen && (openCatS === exName + '\u0000' + catName);
+          html += '<button type="button" class="row-item test-group-row test-cat-row" data-test-cat="' + esc(exName) + '\u0000' + esc(catName) + '">' +
+            '<span class="row-label">📂 ' + esc(catName) + '</span>' +
+            '<span class="row-count">' + cat.tests.length + ' test' + (cat.tests.length > 1 ? 's' : '') + '</span></button>';
+          if (!catOpen) { return; }
+          cat.tests.forEach(function (t) { html += testCardHtml(t); });
+        });
+      });
+    }
     list.innerHTML = html;
     // Per test, ask the server for THIS user's latest attempt (never anyone
     // else's — the server filters by the caller's deviceId). Cards with a
@@ -1135,7 +1163,7 @@ async function refreshSavedTests(silent) {
     // already shown from the initial load) to keep the poll cheap.
     if (silent) { return; }
     savedAttempts = {};
-    tests.forEach(function (t) {
+    tabTests.forEach(function (t) {
       apiCall('/tests/last-attempt', { testId: t.id }).then(function (d) {
         lastAttemptChecked[t.id] = true;
         if (d && d.attempt) {
@@ -1177,9 +1205,27 @@ function showTestChoice(testId, attempt, title) {
   pushBack({ kind: 'choice', undo: closeTestChoice });
 }
 
+/* v1.0.17: top tabs — Chapter Test / Sectional Test — switch which
+ * tests the Saved tests card shows. */
+$('testsTabs').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-tests-tab]');
+  if (!b) { return; }
+  var tab = b.getAttribute('data-tests-tab');
+  if (window.__testsTab === tab) { return; }
+  window.__testsTab = tab;
+  window.__testsOpenCat = null;
+  window.__testsOpenChap = null;
+  window.__testsOpenExam = null;
+  document.querySelectorAll('#testsTabs .tests-tab').forEach(function (el) {
+    el.classList.toggle('tests-tab-active', el.getAttribute('data-tests-tab') === tab);
+  });
+  refreshSavedTests(true);
+});
+
 $('savedTestsList').addEventListener('click', function (ev) {
-  // v1.0.16: three-level group rows expand and collapse (Exam →
-  // Category → Chapter); the test cards still open the test.
+  // v1.0.17: group rows expand and collapse (Category → Chapter in the
+  // Chapter tab; Exam → Subject in the Sectional tab); the test cards
+  // still open the test.
   var ex = ev.target.closest('[data-test-exam]');
   if (ex) {
     var exName = ex.getAttribute('data-test-exam');

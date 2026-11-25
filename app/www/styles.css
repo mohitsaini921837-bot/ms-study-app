@@ -780,6 +780,11 @@ p { margin: 0 0 12px; line-height: 1.55; }
 
 /* v1.0.15: test category / chapter group rows (Vidyagram-like structure)
  * — same glass row as folders, chapters indented one level. */
+.tests-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.tests-tab { flex: 1; padding: 12px 8px; border-radius: 16px; border: 1px solid var(--hatch-widget-border, rgba(120, 120, 160, 0.25)); background: var(--hatch-widget-surface, rgba(255, 255, 255, 0.45)); color: var(--hatch-widget-text, #1a1a2e); font-size: 15px; font-weight: 600; cursor: pointer; backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1), background 320ms, box-shadow 320ms; }
+.tests-tab:active { transform: scale(0.96); }
+.tests-tab-active { background: linear-gradient(135deg, rgba(139, 92, 246, 0.55), rgba(45, 212, 191, 0.55)); color: #fff; border-color: transparent; box-shadow: 0 4px 18px rgba(139, 92, 246, 0.35); }
+
 .test-group-row { width: 100%; text-align: left; margin-bottom: 8px; }
 .test-cat-row { margin-left: 18px; width: calc(100% - 18px); }
 .test-chapter-row { margin-left: 36px; width: calc(100% - 36px); }
