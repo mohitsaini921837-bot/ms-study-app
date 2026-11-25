@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 16;
+var CURRENT_VERSION_CODE = 17;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -1062,47 +1062,69 @@ async function refreshSavedTests(silent) {
     var data = await apiCall('/tests/list', {});
     var tests = (data && data.tests) || [];
     if (tests.length === 0) { list.innerHTML = '<p class="muted">No tests.</p>'; return; }
-    // v1.0.15: Vidyagram-like structure — tests are grouped by category
-    // (e.g. REASONING) then chapter (e.g. Analogy), each group an
-    // expandable glass row; the test cards sit inside their chapter.
+    // v1.0.16 (user order 2026-11-25): Vidyagram-like structure, THREE
+    // levels — Exam first (e.g. "Chapter Test" or "SSC CGL TIER I"),
+    // then Subject/Category (e.g. REASONING), then Chapter (e.g.
+    // Analogy), then the test cards. NOT limited to folder/section.
     var html = '';
-    var groups = {};
-    var groupOrder = [];
+    var testCardHtml = function (t) {
+      var lang = (t.language === 'hi') ? 'Hindi' : (t.language === 'en') ? 'English' : (t.language || '');
+      var meta = (t.question_count || '') + ' questions · ' + (t.duration_min || '') + ' min' +
+        (lang ? ' · ' + lang : '');
+      return '<button type="button" class="test-card" data-test="' + esc(t.id) + '" data-title="' + esc(t.title || '') +
+        '" data-q="' + (t.question_count || '') + '" data-m="' + (t.duration_min || '') + '">' +
+        '<span class="test-card-start">▶ Start</span>' +
+        '<span class="test-card-title">' + esc(t.title || 'Test') + '</span>' +
+        '<span class="test-card-meta">' + esc(meta) + '</span></button>';
+    };
+    var exams = {};
+    var examOrder = [];
     tests.forEach(function (t) {
-      var cat = (t.category || 'Tests').toString();
+      var ex = (t.exam || 'Tests').toString();
+      var cat = (t.category || '').toString();
       var chap = (t.chapter || '').toString();
-      var key = cat + '\u0000' + chap;
-      if (!groups[key]) {
-        groups[key] = { category: cat, chapter: chap, tests: [] };
-        groupOrder.push(key);
-      }
-      groups[key].tests.push(t);
+      if (!exams[ex]) { exams[ex] = { name: ex, categories: {}, catOrder: [], tests: [] }; examOrder.push(ex); }
+      if (!cat) { exams[ex].tests.push(t); return; }
+      if (!exams[ex].categories[cat]) { exams[ex].categories[cat] = { name: cat, chapters: {}, chapOrder: [], tests: [] }; exams[ex].catOrder.push(cat); }
+      if (!chap) { exams[ex].categories[cat].tests.push(t); return; }
+      if (!exams[ex].categories[cat].chapters[chap]) { exams[ex].categories[cat].chapters[chap] = { name: chap, tests: [] }; exams[ex].categories[cat].chapOrder.push(chap); }
+      exams[ex].categories[cat].chapters[chap].tests.push(t);
     });
+    var openExam = window.__testsOpenExam || null;
     var openCat = window.__testsOpenCat || null;
     var openChap = window.__testsOpenChap || null;
-    groupOrder.forEach(function (key) {
-      var g = groups[key];
-      var catOpen = (openCat === g.category);
-      var chapOpen = catOpen && (openChap === g.chapter);
-      html += '<button type="button" class="row-item test-group-row" data-test-cat="' + esc(g.category) + '">' +
-        '<span class="row-label">📁 ' + esc(g.category) + '</span>' +
-        '<span class="row-count">' + g.tests.length + ' test' + (g.tests.length > 1 ? 's' : '') + '</span></button>';
-      if (!catOpen) { return; }
-      if (g.chapter) {
-        html += '<button type="button" class="row-item test-group-row test-chapter-row" data-test-chap="' + esc(g.chapter) + '">' +
-          '<span class="row-label">📂 ' + esc(g.chapter) + '</span>' +
-          '<span class="row-count">' + g.tests.length + ' test' + (g.tests.length > 1 ? 's' : '') + '</span></button>';
-        if (!chapOpen) { return; }
-      }
-      g.tests.forEach(function (t) {
-        var lang = (t.language === 'hi') ? 'Hindi' : (t.language === 'en') ? 'English' : (t.language || '');
-        var meta = (t.question_count || '') + ' questions · ' + (t.duration_min || '') + ' min' +
-          (lang ? ' · ' + lang : '');
-        html += '<button type="button" class="test-card" data-test="' + esc(t.id) + '" data-title="' + esc(t.title || '') +
-          '" data-q="' + (t.question_count || '') + '" data-m="' + (t.duration_min || '') + '">' +
-          '<span class="test-card-start">▶ Start</span>' +
-          '<span class="test-card-title">' + esc(t.title || 'Test') + '</span>' +
-          '<span class="test-card-meta">' + esc(meta) + '</span></button>';
+    examOrder.forEach(function (exName) {
+      var ex = exams[exName];
+      var exCount = ex.tests.length;
+      ex.catOrder.forEach(function (c) {
+        exCount += ex.categories[c].tests.length;
+        ex.categories[c].chapOrder.forEach(function (h) { exCount += ex.categories[c].chapters[h].tests.length; });
+      });
+      var examOpen = (openExam === exName);
+      html += '<button type="button" class="row-item test-group-row" data-test-exam="' + esc(exName) + '">' +
+        '<span class="row-label">📁 ' + esc(exName) + '</span>' +
+        '<span class="row-count">' + exCount + ' test' + (exCount > 1 ? 's' : '') + '</span></button>';
+      if (!examOpen) { return; }
+      ex.tests.forEach(function (t) { html += testCardHtml(t); });
+      ex.catOrder.forEach(function (catName) {
+        var cat = ex.categories[catName];
+        var catCount = cat.tests.length;
+        cat.chapOrder.forEach(function (h) { catCount += cat.chapters[h].tests.length; });
+        var catOpen = examOpen && (openCat === exName + '\u0000' + catName);
+        html += '<button type="button" class="row-item test-group-row test-cat-row" data-test-cat="' + esc(exName) + '\u0000' + esc(catName) + '">' +
+          '<span class="row-label">📂 ' + esc(catName) + '</span>' +
+          '<span class="row-count">' + catCount + ' test' + (catCount > 1 ? 's' : '') + '</span></button>';
+        if (!catOpen) { return; }
+        cat.tests.forEach(function (t) { html += testCardHtml(t); });
+        cat.chapOrder.forEach(function (chapName) {
+          var chap = cat.chapters[chapName];
+          var chapOpen = catOpen && (openChap === exName + '\u0000' + catName + '\u0000' + chapName);
+          html += '<button type="button" class="row-item test-group-row test-chapter-row" data-test-chap="' + esc(exName) + '\u0000' + esc(catName) + '\u0000' + esc(chapName) + '">' +
+            '<span class="row-label">📄 ' + esc(chapName) + '</span>' +
+            '<span class="row-count">' + chap.tests.length + ' test' + (chap.tests.length > 1 ? 's' : '') + '</span></button>';
+          if (!chapOpen) { return; }
+          chap.tests.forEach(function (t) { html += testCardHtml(t); });
+        });
       });
     });
     list.innerHTML = html;
@@ -1156,20 +1178,29 @@ function showTestChoice(testId, attempt, title) {
 }
 
 $('savedTestsList').addEventListener('click', function (ev) {
-  // v1.0.15: category / chapter group rows expand and collapse (the
-  // Vidyagram-like structure); the test cards still open the test.
+  // v1.0.16: three-level group rows expand and collapse (Exam →
+  // Category → Chapter); the test cards still open the test.
+  var ex = ev.target.closest('[data-test-exam]');
+  if (ex) {
+    var exName = ex.getAttribute('data-test-exam');
+    window.__testsOpenExam = (window.__testsOpenExam === exName) ? null : exName;
+    window.__testsOpenCat = null;
+    window.__testsOpenChap = null;
+    refreshSavedTests(true);
+    return;
+  }
   var cat = ev.target.closest('[data-test-cat]');
   if (cat) {
-    var catName = cat.getAttribute('data-test-cat');
-    window.__testsOpenCat = (window.__testsOpenCat === catName) ? null : catName;
+    var catKey = cat.getAttribute('data-test-cat');
+    window.__testsOpenCat = (window.__testsOpenCat === catKey) ? null : catKey;
     window.__testsOpenChap = null;
     refreshSavedTests(true);
     return;
   }
   var chap = ev.target.closest('[data-test-chap]');
   if (chap) {
-    var chapName = chap.getAttribute('data-test-chap');
-    window.__testsOpenChap = (window.__testsOpenChap === chapName) ? null : chapName;
+    var chapKey = chap.getAttribute('data-test-chap');
+    window.__testsOpenChap = (window.__testsOpenChap === chapKey) ? null : chapKey;
     refreshSavedTests(true);
     return;
   }

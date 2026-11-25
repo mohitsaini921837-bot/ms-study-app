@@ -781,7 +781,8 @@ p { margin: 0 0 12px; line-height: 1.55; }
 /* v1.0.15: test category / chapter group rows (Vidyagram-like structure)
  * — same glass row as folders, chapters indented one level. */
 .test-group-row { width: 100%; text-align: left; margin-bottom: 8px; }
-.test-chapter-row { margin-left: 18px; width: calc(100% - 18px); }
+.test-cat-row { margin-left: 18px; width: calc(100% - 18px); }
+.test-chapter-row { margin-left: 36px; width: calc(100% - 36px); }
 
 /* ---------- Saved test card: previous-result badge ---------- */
 .test-card-badge {
