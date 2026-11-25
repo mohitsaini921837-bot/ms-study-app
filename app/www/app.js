@@ -248,13 +248,9 @@ function goBackByState() {
   if (currentScreenId === 'screen-admin') { showScreen('screen-notes'); return; }
   // v1.0.18: test navigation sub-pages — back to the parent page.
   if (currentScreenId === 'screen-test-subjects') { showScreen('screen-tests'); return; }
-  if (currentScreenId === 'screen-test-chapters') {
-    if (testsNav.exam) { renderTestSubjects(testsNav.exam); showScreen('screen-test-subjects'); }
-    else { showScreen('screen-tests'); }
-    return;
-  }
+  if (currentScreenId === 'screen-test-chapters') { showScreen('screen-tests'); return; }
   if (currentScreenId === 'screen-test-list') {
-    if (testsNav.exam && testsNav.chapter) { renderTestChapters(testsNav.exam, testsNav.subject); showScreen('screen-test-chapters'); }
+    if (testsNav.chapter) { renderTestChapters(testsNav.subject); showScreen('screen-test-chapters'); }
     else if (testsNav.exam) { renderTestSubjects(testsNav.exam); showScreen('screen-test-subjects'); }
     else { showScreen('screen-tests'); }
     return;
@@ -1104,7 +1100,11 @@ function testChapterOf(t) {
 }
 /* v1.0.19: the Chapter Test / Sectional Test tabs are back on top.
  * A chapter test always has a chapter; a sectional test has none —
- * that is how the tabs split the tests. */
+ * that is how the tabs split the tests.
+ * v1.0.19 (user order 2026-11-25): NO exam level for chapter tests —
+ * Vidyagram does not name any exam for them, so the Chapter tab goes
+ * straight to subjects. Sectional tests DO have exams (SSC CGL, UP
+ * Police, …), so the Sectional tab goes Exam → Subject → Test. */
 function isChapterTest(t) {
   return testChapterOf(t).trim().length > 0;
 }
@@ -1117,8 +1117,17 @@ function tabTests() {
 function testsForExam(exam) {
   return tabTests().filter(function (t) { return testExamOf(t) === exam; });
 }
+function testsForSubjectTab(subject) {
+  return tabTests().filter(function (t) { return testCategoryOf(t) === subject; });
+}
+function chaptersForSubject(subject) {
+  return uniqueSorted(testsForSubjectTab(subject).map(function (t) { return testChapterOf(t); }).filter(function (c) { return !!c; }));
+}
 function testsForSubject(exam, subject) {
-  return testsForExam(exam).filter(function (t) { return testCategoryOf(t) === subject; });
+  // exam is null in the Chapter tab (no exam level there) — then match
+  // by subject only. In the Sectional tab exam is set — match both.
+  var base = exam ? testsForExam(exam) : tabTests();
+  return base.filter(function (t) { return testCategoryOf(t) === subject; });
 }
 function testsForChapter(exam, subject, chapter) {
   return testsForSubject(exam, subject).filter(function (t) { return testChapterOf(t) === chapter; });
@@ -1147,9 +1156,16 @@ async function refreshSavedTests(silent) {
     allTestsCache = tests;
     var tabList = tabTests();
     if (tabList.length === 0) { list.innerHTML = '<p class="muted">No tests yet.</p>'; return; }
-    // Exam folders for THIS tab — full name only, NO counts.
-    var exams = uniqueSorted(tabList.map(function (t) { return testExamOf(t); }));
-    list.innerHTML = exams.map(function (ex) { return navRowHtml(ex, 'data-test-exam', ex); }).join('');
+    // Chapter tab: subjects straight away (NO exam level — Vidyagram
+    // names no exam for chapter tests). Sectional tab: exam folders
+    // (full name only, NO counts).
+    if ((window.__testsTab || 'chapter') === 'chapter') {
+      var subjects = uniqueSorted(tabList.map(function (t) { return testCategoryOf(t); }));
+      list.innerHTML = subjects.map(function (s) { return navRowHtml(s, 'data-test-subject', s); }).join('');
+    } else {
+      var exams = uniqueSorted(tabList.map(function (t) { return testExamOf(t); }));
+      list.innerHTML = exams.map(function (ex) { return navRowHtml(ex, 'data-test-exam', ex); }).join('');
+    }
     // Per-test last-attempt checks (a silent poll skips them — the
     // attempt state is already known from the initial load).
     if (silent) { return; }
@@ -1176,8 +1192,8 @@ function renderTestSubjects(exam) {
     : '<p class="muted">No subjects.</p>';
 }
 
-function renderTestChapters(exam, subject) {
-  var chapters = uniqueSorted(testsForSubject(exam, subject).map(function (t) { return testChapterOf(t); }).filter(function (c) { return !!c; }));
+function renderTestChapters(subject) {
+  var chapters = chaptersForSubject(subject);
   $('testChaptersTitle').textContent = subject;
   $('testChapterList').innerHTML = chapters.length
     ? chapters.map(function (c) { return navRowHtml(c, 'data-test-chapter', c); }).join('')
@@ -1229,11 +1245,11 @@ function renderTestList(tests, title) {
 
 function rerenderTestSubPage() {
   if (currentScreenId === 'screen-test-subjects' && testsNav.exam) { renderTestSubjects(testsNav.exam); return; }
-  if (currentScreenId === 'screen-test-chapters' && testsNav.exam && testsNav.subject) { renderTestChapters(testsNav.exam, testsNav.subject); return; }
+  if (currentScreenId === 'screen-test-chapters' && testsNav.subject) { renderTestChapters(testsNav.subject); return; }
   if (currentScreenId === 'screen-test-list') {
-    if (testsNav.exam && testsNav.subject && testsNav.chapter) {
+    if (testsNav.subject && testsNav.chapter) {
       renderTestList(testsForChapter(testsNav.exam, testsNav.subject, testsNav.chapter), testsNav.chapter);
-    } else if (testsNav.exam && testsNav.subject) {
+    } else if (testsNav.subject) {
       renderTestList(testsForSubject(testsNav.exam, testsNav.subject), testsNav.subject);
     }
     return;
@@ -1250,12 +1266,12 @@ function openTestExam(exam) {
 function openTestSubject(subject) {
   testsNav.subject = subject;
   testsNav.chapter = null;
-  // Chapter tests have chapters; sectional tests go straight to the test list.
-  var chapters = uniqueSorted(testsForSubject(testsNav.exam, subject).map(function (t) { return testChapterOf(t); }).filter(function (c) { return !!c; }));
-  if (chapters.length) {
-    renderTestChapters(testsNav.exam, subject);
+  // Chapter tab: subject → chapters page. Sectional tab: subject →
+  // test list straight away (sectional tests have no chapters).
+  if ((window.__testsTab || 'chapter') === 'chapter') {
+    renderTestChapters(subject);
     showScreen('screen-test-chapters');
-    pushBack({ kind: 'testnav', undo: function () { renderTestSubjects(testsNav.exam); showScreen('screen-test-subjects'); } });
+    pushBack({ kind: 'testnav', undo: function () { showScreen('screen-tests'); } });
   } else {
     takeReturnContext = { screen: 'screen-test-list', exam: testsNav.exam, subject: subject, chapter: null };
     renderTestList(testsForSubject(testsNav.exam, subject), subject);
@@ -1266,10 +1282,10 @@ function openTestSubject(subject) {
 
 function openTestChapter(chapter) {
   testsNav.chapter = chapter;
-  takeReturnContext = { screen: 'screen-test-list', exam: testsNav.exam, subject: testsNav.subject, chapter: chapter };
-  renderTestList(testsForChapter(testsNav.exam, testsNav.subject, chapter), chapter);
+  takeReturnContext = { screen: 'screen-test-list', exam: null, subject: testsNav.subject, chapter: chapter };
+  renderTestList(testsForChapter(null, testsNav.subject, chapter), chapter);
   showScreen('screen-test-list');
-  pushBack({ kind: 'testnav', undo: function () { renderTestChapters(testsNav.exam, testsNav.subject); showScreen('screen-test-chapters'); } });
+  pushBack({ kind: 'testnav', undo: function () { renderTestChapters(testsNav.subject); showScreen('screen-test-chapters'); } });
 }
 
 /* Back buttons on the test sub-pages — same as the system back button. */
@@ -1296,6 +1312,10 @@ $('testsTabs').addEventListener('click', function (ev) {
 });
 
 $('savedTestsList').addEventListener('click', function (ev) {
+  // Chapter tab: the Tests screen lists subjects — tap one to see its
+  // chapters. Sectional tab: it lists exams — tap one to see subjects.
+  var s = ev.target.closest('[data-test-subject]');
+  if (s) { openTestSubject(s.getAttribute('data-test-subject')); return; }
   var ex = ev.target.closest('[data-test-exam]');
   if (!ex) { return; }
   openTestExam(ex.getAttribute('data-test-exam'));
