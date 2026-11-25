@@ -60,17 +60,48 @@
   <section class="screen" id="screen-tests" hidden>
     <div class="section-head"><h2>Tests</h2></div>
 
-    <div class="tests-tabs" id="testsTabs">
-      <button type="button" class="tests-tab tests-tab-active" data-tests-tab="chapter">Chapter Test</button>
-      <button type="button" class="tests-tab" data-tests-tab="sectional">Sectional Test</button>
-    </div>
-
     <div class="card">
-      <h3>Saved tests</h3>
+      <h3>Exams</h3>
       <div id="savedTestsList"></div>
       <p class="muted small" id="testDetail"></p>
     </div>
 
+  </section>
+
+  <!-- v1.0.18: test navigation is page-based — every level opens a NEW
+       page (no expand/collapse). Exam → Subject → Chapter → Test. -->
+  <section class="screen" id="screen-test-subjects" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="testSubjectsBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="testSubjectsTitle"></h2>
+    <div class="card">
+      <h3>Subjects</h3>
+      <div id="testSubjectList"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-test-chapters" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="testChaptersBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="testChaptersTitle"></h2>
+    <div class="card">
+      <h3>Chapters</h3>
+      <div id="testChapterList"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-test-list" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="testListBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="testListTitle"></h2>
+    <div class="card">
+      <h3>Tests</h3>
+      <div id="testList"></div>
+      <p class="muted small" id="testListDetail"></p>
+    </div>
   </section>
 
   <!-- ================= Take test ================= -->

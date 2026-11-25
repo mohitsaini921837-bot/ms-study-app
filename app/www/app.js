@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 18;
+var CURRENT_VERSION_CODE = 19;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -102,7 +102,7 @@ async function getDeviceInfo() {
 
 /* ================= Screens / router ================= */
 var MAIN_SCREENS = ['screen-notes', 'screen-tests', 'screen-practice', 'screen-admin'];
-var ALL_SCREENS = MAIN_SCREENS.concat(['screen-lock', 'screen-chat-lock', 'screen-chat', 'screen-take']);
+var ALL_SCREENS = MAIN_SCREENS.concat(['screen-lock', 'screen-chat-lock', 'screen-chat', 'screen-take', 'screen-test-subjects', 'screen-test-chapters', 'screen-test-list']);
 
 var currentScreenId = 'screen-notes'; // FIX 10 (v1.0.12): tracked for live refresh
 
@@ -154,6 +154,11 @@ function refreshCurrentScreen(silent) {
   if (currentScreenId === 'screen-notes') { return notesBrowser.load(silent); }
   if (currentScreenId === 'screen-practice') { return practiceBrowser.load(silent); }
   if (currentScreenId === 'screen-tests') { return refreshSavedTests(silent); }
+  // v1.0.18: on a test sub-page, re-fetch the tests silently and
+  // re-render this page from the fresh cache.
+  if (currentScreenId === 'screen-test-subjects' || currentScreenId === 'screen-test-chapters' || currentScreenId === 'screen-test-list') {
+    return refreshSavedTests(true).then(function () { rerenderTestSubPage(); }).catch(function () { /* silent */ });
+  }
   return Promise.resolve();
 }
 
@@ -237,11 +242,23 @@ function goBackByState() {
   // 1. Any overlay still open? Close only it.
   if ($('screen-viewer') && !$('screen-viewer').hidden) { closeViewer(); return; }
   if ($('takePalette') && !$('takePalette').hidden) { closeTakePalette(); return; }
-  if ($('testChoiceDialog') && !$('testChoiceDialog').hidden) { closeTestChoice(); return; }
   if ($('chatMsgMenu') && !$('chatMsgMenu').hidden) { closeChatMsgMenu(); return; }
   // 2. A sub-screen? Back to the main screen it came from.
   if (currentScreenId === 'screen-take') { exitTakeScreen(); return; }
   if (currentScreenId === 'screen-admin') { showScreen('screen-notes'); return; }
+  // v1.0.18: test navigation sub-pages — back to the parent page.
+  if (currentScreenId === 'screen-test-subjects') { showScreen('screen-tests'); return; }
+  if (currentScreenId === 'screen-test-chapters') {
+    if (testsNav.exam) { renderTestSubjects(testsNav.exam); showScreen('screen-test-subjects'); }
+    else { showScreen('screen-tests'); }
+    return;
+  }
+  if (currentScreenId === 'screen-test-list') {
+    if (testsNav.exam && testsNav.chapter) { renderTestChapters(testsNav.exam, testsNav.subject); showScreen('screen-test-chapters'); }
+    else if (testsNav.exam) { renderTestSubjects(testsNav.exam); showScreen('screen-test-subjects'); }
+    else { showScreen('screen-tests'); }
+    return;
+  }
   if (currentScreenId === 'screen-chat' || currentScreenId === 'screen-chat-lock') { stopChat(); showScreen('screen-notes'); return; }
   // 3. Folder / section back, one level (state-based).
   if (currentScreenId === 'screen-notes' || currentScreenId === 'screen-practice') {
@@ -255,6 +272,19 @@ function goBackByState() {
 function exitTakeScreen() {
   stopTakeTimer();
   takeState = null;
+  // v1.0.18: return to the test list this test was opened from.
+  if (takeReturnContext) {
+    var ctx = takeReturnContext;
+    takeReturnContext = null;
+    testsNav = { exam: ctx.exam, subject: ctx.subject, chapter: ctx.chapter };
+    if (ctx.chapter) {
+      renderTestList(testsForChapter(ctx.exam, ctx.subject, ctx.chapter), ctx.chapter);
+    } else if (ctx.subject) {
+      renderTestList(testsForSubject(ctx.exam, ctx.subject), ctx.subject);
+    }
+    showScreen('screen-test-list');
+    return;
+  }
   showScreen('screen-tests');
 }
 
@@ -1051,6 +1081,47 @@ function refreshTestsScreen() {
 var savedAttempts = {};
 var lastAttemptChecked = {};
 
+/* v1.0.18 (user order 2026-11-25): test navigation is PAGE-BASED.
+ * Every level opens a NEW page — never expand/collapse in place.
+ *   Tests screen → Exam folders (full name only, no counts)
+ *   Exam → Subject page (names only, no counts)
+ *   Subject → Chapter page (chapter tests only; names only)
+ *   Chapter (or Subject for sectional) → Test page
+ * A test card shows Attempt when never taken, and Result + Re-attempt
+ * when this user has taken it (Vidyagram-style). */
+var allTestsCache = [];
+var testsNav = { exam: null, subject: null, chapter: null };
+var takeReturnContext = null; // where to return after a test / result view
+
+function testExamOf(t) {
+  return (t.exam || 'Chapter Test').toString();
+}
+function testCategoryOf(t) {
+  return (t.category || 'Tests').toString();
+}
+function testChapterOf(t) {
+  return (t.chapter || '').toString();
+}
+function testsForExam(exam) {
+  return allTestsCache.filter(function (t) { return testExamOf(t) === exam; });
+}
+function testsForSubject(exam, subject) {
+  return testsForExam(exam).filter(function (t) { return testCategoryOf(t) === subject; });
+}
+function testsForChapter(exam, subject, chapter) {
+  return testsForSubject(exam, subject).filter(function (t) { return testChapterOf(t) === chapter; });
+}
+function uniqueSorted(arr) {
+  var seen = {};
+  var out = [];
+  arr.forEach(function (v) { if (!seen[v]) { seen[v] = true; out.push(v); } });
+  return out.sort();
+}
+function navRowHtml(label, attr, val) {
+  return '<button type="button" class="row-item test-nav-row" ' + attr + '="' + esc(val) + '">' +
+    '<span class="row-label">📁 ' + esc(label) + '</span></button>';
+}
+
 async function refreshSavedTests(silent) {
   var list = $('savedTestsList');
   if (!list) { return; }
@@ -1061,123 +1132,20 @@ async function refreshSavedTests(silent) {
   try {
     var data = await apiCall('/tests/list', {});
     var tests = (data && data.tests) || [];
+    allTestsCache = tests;
     if (tests.length === 0) { list.innerHTML = '<p class="muted">No tests.</p>'; return; }
-    // v1.0.17 (user order 2026-11-25): Chapter Test and Sectional Test
-    // are TOP tabs on the Tests screen (not rows inside Saved tests).
-    // Chapter tab: Category → Chapter → Test. Sectional tab:
-    // Exam → Subject → Test.
-    var tab = window.__testsTab || 'chapter';
-    var tabTests = tests.filter(function (t) {
-      var isChapter = (!t.exam || t.exam === 'Chapter Test');
-      return tab === 'chapter' ? isChapter : !isChapter;
-    });
-    if (tabTests.length === 0) {
-      list.innerHTML = '<p class="muted">No tests yet.</p>';
-      return;
-    }
-    var html = '';
-    var testCardHtml = function (t) {
-      var lang = (t.language === 'hi') ? 'Hindi' : (t.language === 'en') ? 'English' : (t.language || '');
-      var meta = (t.question_count || '') + ' questions · ' + (t.duration_min || '') + ' min' +
-        (lang ? ' · ' + lang : '');
-      return '<button type="button" class="test-card" data-test="' + esc(t.id) + '" data-title="' + esc(t.title || '') +
-        '" data-q="' + (t.question_count || '') + '" data-m="' + (t.duration_min || '') + '">' +
-        '<span class="test-card-start">▶ Start</span>' +
-        '<span class="test-card-title">' + esc(t.title || 'Test') + '</span>' +
-        '<span class="test-card-meta">' + esc(meta) + '</span></button>';
-    };
-    if (tab === 'chapter') {
-      // Category → Chapter → Test.
-      var cats = {};
-      var catOrder = [];
-      tabTests.forEach(function (t) {
-        var cat = (t.category || 'Tests').toString();
-        var chap = (t.chapter || '').toString();
-        if (!cats[cat]) { cats[cat] = { name: cat, chapters: {}, chapOrder: [], tests: [] }; catOrder.push(cat); }
-        if (!chap) { cats[cat].tests.push(t); return; }
-        if (!cats[cat].chapters[chap]) { cats[cat].chapters[chap] = { name: chap, tests: [] }; cats[cat].chapOrder.push(chap); }
-        cats[cat].chapters[chap].tests.push(t);
-      });
-      var openCat = window.__testsOpenCat || null;
-      var openChap = window.__testsOpenChap || null;
-      catOrder.forEach(function (catName) {
-        var cat = cats[catName];
-        var catCount = cat.tests.length;
-        cat.chapOrder.forEach(function (h) { catCount += cat.chapters[h].tests.length; });
-        var catOpen = (openCat === catName);
-        html += '<button type="button" class="row-item test-group-row" data-test-cat="' + esc(catName) + '">' +
-          '<span class="row-label">📁 ' + esc(catName) + '</span>' +
-          '<span class="row-count">' + catCount + ' test' + (catCount > 1 ? 's' : '') + '</span></button>';
-        if (!catOpen) { return; }
-        cat.tests.forEach(function (t) { html += testCardHtml(t); });
-        cat.chapOrder.forEach(function (chapName) {
-          var chap = cat.chapters[chapName];
-          var chapOpen = catOpen && (openChap === catName + '\u0000' + chapName);
-          html += '<button type="button" class="row-item test-group-row test-chapter-row" data-test-chap="' + esc(catName) + '\u0000' + esc(chapName) + '">' +
-            '<span class="row-label">📂 ' + esc(chapName) + '</span>' +
-            '<span class="row-count">' + chap.tests.length + ' test' + (chap.tests.length > 1 ? 's' : '') + '</span></button>';
-          if (!chapOpen) { return; }
-          chap.tests.forEach(function (t) { html += testCardHtml(t); });
-        });
-      });
-    } else {
-      // Sectional tab: Exam → Subject → Test.
-      var exams = {};
-      var examOrder = [];
-      tabTests.forEach(function (t) {
-        var ex = (t.exam || 'Sectional').toString();
-        var cat = (t.category || '').toString();
-        if (!exams[ex]) { exams[ex] = { name: ex, categories: {}, catOrder: [], tests: [] }; examOrder.push(ex); }
-        if (!cat) { exams[ex].tests.push(t); return; }
-        if (!exams[ex].categories[cat]) { exams[ex].categories[cat] = { name: cat, tests: [] }; exams[ex].catOrder.push(cat); }
-        exams[ex].categories[cat].tests.push(t);
-      });
-      var openExam = window.__testsOpenExam || null;
-      var openCatS = window.__testsOpenCat || null;
-      examOrder.forEach(function (exName) {
-        var ex = exams[exName];
-        var exCount = ex.tests.length;
-        ex.catOrder.forEach(function (c) { exCount += ex.categories[c].tests.length; });
-        var examOpen = (openExam === exName);
-        html += '<button type="button" class="row-item test-group-row" data-test-exam="' + esc(exName) + '">' +
-          '<span class="row-label">📁 ' + esc(exName) + '</span>' +
-          '<span class="row-count">' + exCount + ' test' + (exCount > 1 ? 's' : '') + '</span></button>';
-        if (!examOpen) { return; }
-        ex.tests.forEach(function (t) { html += testCardHtml(t); });
-        ex.catOrder.forEach(function (catName) {
-          var cat = ex.categories[catName];
-          var catOpen = examOpen && (openCatS === exName + '\u0000' + catName);
-          html += '<button type="button" class="row-item test-group-row test-cat-row" data-test-cat="' + esc(exName) + '\u0000' + esc(catName) + '">' +
-            '<span class="row-label">📂 ' + esc(catName) + '</span>' +
-            '<span class="row-count">' + cat.tests.length + ' test' + (cat.tests.length > 1 ? 's' : '') + '</span></button>';
-          if (!catOpen) { return; }
-          cat.tests.forEach(function (t) { html += testCardHtml(t); });
-        });
-      });
-    }
-    list.innerHTML = html;
-    // Per test, ask the server for THIS user's latest attempt (never anyone
-    // else's — the server filters by the caller's deviceId). Cards with a
-    // previous attempt get a badge and offer Re-attempt / View Results.
-    // FIX 10: a silent poll skips these per-test calls (the badges are
-    // already shown from the initial load) to keep the poll cheap.
+    // Exam folders — full name only, NO counts.
+    var exams = uniqueSorted(tests.map(function (t) { return testExamOf(t); }));
+    list.innerHTML = exams.map(function (ex) { return navRowHtml(ex, 'data-test-exam', ex); }).join('');
+    // Per-test last-attempt checks (a silent poll skips them — the
+    // attempt state is already known from the initial load).
     if (silent) { return; }
     savedAttempts = {};
-    tabTests.forEach(function (t) {
+    tests.forEach(function (t) {
       apiCall('/tests/last-attempt', { testId: t.id }).then(function (d) {
         lastAttemptChecked[t.id] = true;
-        if (d && d.attempt) {
-          savedAttempts[t.id] = d.attempt;
-          var card = list.querySelector('[data-test="' + t.id + '"]');
-          if (card) {
-            card.setAttribute('data-has-attempt', '1');
-            var badge = document.createElement('span');
-            badge.className = 'test-card-badge';
-            badge.textContent = '✓ Previous result';
-            card.appendChild(badge);
-          }
-        }
-      }).catch(function () { lastAttemptChecked[t.id] = true; /* no attempt (or offline) — card stays a plain Start */ });
+        if (d && d.attempt) { savedAttempts[t.id] = d.attempt; }
+      }).catch(function () { lastAttemptChecked[t.id] = true; });
     });
   } catch (e) {
     if (!silent) {
@@ -1187,112 +1155,162 @@ async function refreshSavedTests(silent) {
   }
 }
 
-/* Tapping a test: if THIS user has a previous attempt, offer Re-attempt /
- * View Results; otherwise start the test directly as before. */
-var testChoice = null;
-
-function closeTestChoice() {
-  removeBackEntry('choice');
-  $('testChoiceDialog').hidden = true;
-  testChoice = null;
+function renderTestSubjects(exam) {
+  var subjects = uniqueSorted(testsForExam(exam).map(function (t) { return testCategoryOf(t); }));
+  $('testSubjectsTitle').textContent = exam;
+  $('testSubjectList').innerHTML = subjects.length
+    ? subjects.map(function (s) { return navRowHtml(s, 'data-test-subject', s); }).join('')
+    : '<p class="muted">No subjects.</p>';
 }
 
-function showTestChoice(testId, attempt, title) {
-  testChoice = { testId: testId, attempt: attempt, title: title || 'Test' };
-  $('testChoiceTitle').textContent = testChoice.title;
-  $('testChoiceMeta').textContent = 'You have attempted this test before.';
-  $('testChoiceDialog').hidden = false;
-  pushBack({ kind: 'choice', undo: closeTestChoice });
+function renderTestChapters(exam, subject) {
+  var chapters = uniqueSorted(testsForSubject(exam, subject).map(function (t) { return testChapterOf(t); }).filter(function (c) { return !!c; }));
+  $('testChaptersTitle').textContent = subject;
+  $('testChapterList').innerHTML = chapters.length
+    ? chapters.map(function (c) { return navRowHtml(c, 'data-test-chapter', c); }).join('')
+    : '<p class="muted">No chapters.</p>';
 }
 
-/* v1.0.17: top tabs — Chapter Test / Sectional Test — switch which
- * tests the Saved tests card shows. */
-$('testsTabs').addEventListener('click', function (ev) {
-  var b = ev.target.closest('[data-tests-tab]');
-  if (!b) { return; }
-  var tab = b.getAttribute('data-tests-tab');
-  if (window.__testsTab === tab) { return; }
-  window.__testsTab = tab;
-  window.__testsOpenCat = null;
-  window.__testsOpenChap = null;
-  window.__testsOpenExam = null;
-  document.querySelectorAll('#testsTabs .tests-tab').forEach(function (el) {
-    el.classList.toggle('tests-tab-active', el.getAttribute('data-tests-tab') === tab);
+function testCardHtml(t) {
+  var lang = (t.language === 'hi') ? 'Hindi' : (t.language === 'en') ? 'English' : (t.language || '');
+  var meta = (t.question_count || '') + ' questions · ' + (t.duration_min || '') + ' min' +
+    (lang ? ' · ' + lang : '');
+  return '<div class="test-card" data-test="' + esc(t.id) + '">' +
+    '<span class="test-card-title">' + esc(t.title || 'Test') + '</span>' +
+    '<span class="test-card-meta">' + esc(meta) + '</span>' +
+    '<div class="test-card-actions" data-actions-for="' + esc(t.id) + '">' +
+    '<button type="button" class="btn-primary btn-glass-color test-act-btn" data-act="attempt" data-test="' + esc(t.id) + '">Attempt</button>' +
+    '</div></div>';
+}
+
+function testCardActionsHtml(testId, hasAttempt) {
+  if (!hasAttempt) {
+    return '<button type="button" class="btn-primary btn-glass-color test-act-btn" data-act="attempt" data-test="' + esc(testId) + '">Attempt</button>';
+  }
+  return '<button type="button" class="btn-secondary test-act-btn" data-act="result" data-test="' + esc(testId) + '">Result</button>' +
+    '<button type="button" class="btn-primary btn-glass-color test-act-btn" data-act="reattempt" data-test="' + esc(testId) + '">Re-attempt</button>';
+}
+
+function renderTestList(tests, title) {
+  $('testListTitle').textContent = title;
+  var listEl = $('testList');
+  var detailEl = $('testListDetail');
+  if (detailEl) { detailEl.textContent = ''; }
+  if (!tests.length) { listEl.innerHTML = '<p class="muted">No tests.</p>'; return; }
+  listEl.innerHTML = tests.map(testCardHtml).join('');
+  // For each test, check THIS user's latest attempt and swap the card's
+  // buttons: Attempt only when never taken; Result + Re-attempt when taken.
+  tests.forEach(function (t) {
+    var apply = function (attempt) {
+      var box = listEl.querySelector('[data-actions-for="' + t.id + '"]');
+      if (box) { box.innerHTML = testCardActionsHtml(t.id, !!attempt); }
+    };
+    if (lastAttemptChecked[t.id]) { apply(savedAttempts[t.id] || null); return; }
+    apiCall('/tests/last-attempt', { testId: t.id }).then(function (d) {
+      lastAttemptChecked[t.id] = true;
+      if (d && d.attempt) { savedAttempts[t.id] = d.attempt; }
+      apply(d && d.attempt ? d.attempt : null);
+    }).catch(function () { lastAttemptChecked[t.id] = true; });
   });
-  refreshSavedTests(true);
-});
+}
+
+function rerenderTestSubPage() {
+  if (currentScreenId === 'screen-test-subjects' && testsNav.exam) { renderTestSubjects(testsNav.exam); return; }
+  if (currentScreenId === 'screen-test-chapters' && testsNav.exam && testsNav.subject) { renderTestChapters(testsNav.exam, testsNav.subject); return; }
+  if (currentScreenId === 'screen-test-list') {
+    if (testsNav.exam && testsNav.subject && testsNav.chapter) {
+      renderTestList(testsForChapter(testsNav.exam, testsNav.subject, testsNav.chapter), testsNav.chapter);
+    } else if (testsNav.exam && testsNav.subject) {
+      renderTestList(testsForSubject(testsNav.exam, testsNav.subject), testsNav.subject);
+    }
+    return;
+  }
+}
+
+function openTestExam(exam) {
+  testsNav = { exam: exam, subject: null, chapter: null };
+  renderTestSubjects(exam);
+  showScreen('screen-test-subjects');
+  pushBack({ kind: 'testnav', undo: function () { showScreen('screen-tests'); } });
+}
+
+function openTestSubject(subject) {
+  testsNav.subject = subject;
+  testsNav.chapter = null;
+  // Chapter tests have chapters; sectional tests go straight to the test list.
+  var chapters = uniqueSorted(testsForSubject(testsNav.exam, subject).map(function (t) { return testChapterOf(t); }).filter(function (c) { return !!c; }));
+  if (chapters.length) {
+    renderTestChapters(testsNav.exam, subject);
+    showScreen('screen-test-chapters');
+    pushBack({ kind: 'testnav', undo: function () { renderTestSubjects(testsNav.exam); showScreen('screen-test-subjects'); } });
+  } else {
+    takeReturnContext = { screen: 'screen-test-list', exam: testsNav.exam, subject: subject, chapter: null };
+    renderTestList(testsForSubject(testsNav.exam, subject), subject);
+    showScreen('screen-test-list');
+    pushBack({ kind: 'testnav', undo: function () { renderTestSubjects(testsNav.exam); showScreen('screen-test-subjects'); } });
+  }
+}
+
+function openTestChapter(chapter) {
+  testsNav.chapter = chapter;
+  takeReturnContext = { screen: 'screen-test-list', exam: testsNav.exam, subject: testsNav.subject, chapter: chapter };
+  renderTestList(testsForChapter(testsNav.exam, testsNav.subject, chapter), chapter);
+  showScreen('screen-test-list');
+  pushBack({ kind: 'testnav', undo: function () { renderTestChapters(testsNav.exam, testsNav.subject); showScreen('screen-test-chapters'); } });
+}
+
+/* Back buttons on the test sub-pages — same as the system back button. */
+$('testSubjectsBackBtn').addEventListener('click', goBackOneStep);
+$('testChaptersBackBtn').addEventListener('click', goBackOneStep);
+$('testListBackBtn').addEventListener('click', goBackOneStep);
 
 $('savedTestsList').addEventListener('click', function (ev) {
-  // v1.0.17: group rows expand and collapse (Category → Chapter in the
-  // Chapter tab; Exam → Subject in the Sectional tab); the test cards
-  // still open the test.
   var ex = ev.target.closest('[data-test-exam]');
-  if (ex) {
-    var exName = ex.getAttribute('data-test-exam');
-    window.__testsOpenExam = (window.__testsOpenExam === exName) ? null : exName;
-    window.__testsOpenCat = null;
-    window.__testsOpenChap = null;
-    refreshSavedTests(true);
-    return;
-  }
-  var cat = ev.target.closest('[data-test-cat]');
-  if (cat) {
-    var catKey = cat.getAttribute('data-test-cat');
-    window.__testsOpenCat = (window.__testsOpenCat === catKey) ? null : catKey;
-    window.__testsOpenChap = null;
-    refreshSavedTests(true);
-    return;
-  }
-  var chap = ev.target.closest('[data-test-chap]');
-  if (chap) {
-    var chapKey = chap.getAttribute('data-test-chap');
-    window.__testsOpenChap = (window.__testsOpenChap === chapKey) ? null : chapKey;
-    refreshSavedTests(true);
-    return;
-  }
-  var b = ev.target.closest('[data-test]');
+  if (!ex) { return; }
+  openTestExam(ex.getAttribute('data-test-exam'));
+});
+
+$('testSubjectList').addEventListener('click', function (ev) {
+  var s = ev.target.closest('[data-test-subject]');
+  if (!s) { return; }
+  openTestSubject(s.getAttribute('data-test-subject'));
+});
+
+$('testChapterList').addEventListener('click', function (ev) {
+  var c = ev.target.closest('[data-test-chapter]');
+  if (!c) { return; }
+  openTestChapter(c.getAttribute('data-test-chapter'));
+});
+
+$('testList').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-act]');
   if (!b) { return; }
   var testId = b.getAttribute('data-test');
-  var title = b.getAttribute('data-title') || 'Test';
-  var attempt = savedAttempts[testId];
-  if (attempt) { showTestChoice(testId, attempt, title); return; }
-  if (lastAttemptChecked[testId]) { openTest(testId); return; }
-  // The background last-attempt check has not finished yet: check live now
-  // so a fast tap still offers View Results instead of wrongly starting over.
-  $('testDetail').textContent = 'Loading…';
-  apiCall('/tests/last-attempt', { testId: testId }).then(function (d) {
-    lastAttemptChecked[testId] = true;
-    $('testDetail').textContent = '';
-    if (d && d.attempt) {
-      savedAttempts[testId] = d.attempt;
-      showTestChoice(testId, d.attempt, title);
-    } else {
-      openTest(testId);
-    }
-  }).catch(function (e) {
-    $('testDetail').textContent = e.message || 'Try again.';
-  });
+  var act = b.getAttribute('data-act');
+  if (act === 'attempt' || act === 'reattempt') {
+    openTest(testId);
+    return;
+  }
+  if (act === 'result') {
+    var attempt = savedAttempts[testId];
+    if (attempt) { viewSavedResult(testId, attempt); return; }
+    // Attempt status not loaded yet — check live, then show the result.
+    var detailEl = $('testListDetail');
+    if (detailEl) { detailEl.textContent = 'Loading…'; }
+    apiCall('/tests/last-attempt', { testId: testId }).then(function (d) {
+      lastAttemptChecked[testId] = true;
+      if (detailEl) { detailEl.textContent = ''; }
+      if (d && d.attempt) {
+        savedAttempts[testId] = d.attempt;
+        viewSavedResult(testId, d.attempt);
+      } else if (detailEl) {
+        detailEl.textContent = 'No result yet.';
+      }
+    }).catch(function (e) {
+      if (detailEl) { detailEl.textContent = e.message || 'Try again.'; }
+    });
+  }
 });
-
-$('testReattemptBtn').addEventListener('click', function () {
-  if (!testChoice) { return; }
-  var testId = testChoice.testId;
-  closeTestChoice();
-  openTest(testId);
-});
-
-$('testViewResultBtn').addEventListener('click', function () {
-  if (!testChoice) { return; }
-  var c = testChoice;
-  closeTestChoice();
-  viewSavedResult(c.testId, c.attempt);
-});
-
-$('testChoiceCancelBtn').addEventListener('click', closeTestChoice);
-$('testChoiceDialog').addEventListener('click', function (ev) {
-  if (ev.target === $('testChoiceDialog')) { closeTestChoice(); }
-});
-
 /* v1.0.14 (user order 2026-11-25): AI test generation removed — the
  * form, its listeners and the /tests/generate call are all gone. Tests
  * are uploaded manually now and visible to everyone. */
@@ -2700,3 +2718,4 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Sta
     window.Capacitor.Plugins.StatusBar.setBackgroundColor({ color: '#f4f6f9' });
   } catch (e) { /* non-fatal on web */ }
 }
+

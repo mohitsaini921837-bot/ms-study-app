@@ -404,6 +404,11 @@ p { margin: 0 0 12px; line-height: 1.55; }
 }
 .test-card-title { font-size: 16px; font-weight: 700; }
 .test-card-meta { font-size: 13px; color: var(--muted); font-weight: 600; }
+/* v1.0.18: page-based test navigation — folder rows (name only, no
+ * counts) and per-test Attempt / Result / Re-attempt buttons. */
+.test-nav-row { width: 100%; text-align: left; margin-bottom: 8px; }
+.test-card-actions { display: flex; gap: 8px; margin-top: 4px; }
+.test-act-btn { flex: 1; padding: 10px 8px; font-size: 14px; }
 .row-static { cursor: default; }
 .row-static:active { transform: none; }
 .row-form { display: flex; gap: 8px; margin-top: 12px; }
