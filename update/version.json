@@ -1,6 +1,6 @@
 {
-  "apkUrl": "https://mohitsaini921837-bot.github.io/ms-study-app/update/MS-Study-v1.0.13.apk",
-  "changelog": "Chat seen ticks only when you actually open the chat (no more auto-seen from background), latest message no longer pops up again and again, keyboard stays open after sending a message, PDF upload no longer wiped by live refresh, notification permission now asks when you open the chat with a visible on/off status.",
-  "version": "1.0.13",
-  "versionCode": 14
+  "apkUrl": "https://mohitsaini921837-bot.github.io/ms-study-app/update/MS-Study-v1.0.14.apk",
+  "changelog": "AI test generation removed — tests are uploaded manually and visible to everyone. New Mark as complete: 3-dot menu on every folder, section, note and practice sheet, green tick that stays saved with your password on any phone.",
+  "version": "1.0.14",
+  "versionCode": 15
 }

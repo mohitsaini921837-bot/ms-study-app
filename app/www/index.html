@@ -60,36 +60,6 @@
   <section class="screen" id="screen-tests" hidden>
     <div class="section-head"><h2>Tests</h2></div>
 
-    <div class="card" id="aiTestForm" hidden>
-      <h3>New test</h3>
-      <label class="field-label" for="testType">Type</label>
-      <select class="field-input" id="testType">
-        <option value="notes">From notes</option>
-        <option value="pyq">PYQ</option>
-        <option value="mixed">Mixed</option>
-        <option value="sheet">From sheet</option>
-      </select>
-      <label class="field-label" for="testTopic">Topic</label>
-      <input class="field-input" id="testTopic" type="text" placeholder="Topic" autocomplete="off" />
-      <label class="field-label" for="testSubject">Subject</label>
-      <input class="field-input" id="testSubject" type="text" placeholder="Subject (optional)" autocomplete="off" />
-      <label class="field-label" for="testQuestions">Questions</label>
-      <input class="field-input" id="testQuestions" type="number" min="10" max="50" step="5" value="10" />
-      <label class="field-label" for="testMinutes">Time (minutes)</label>
-      <input class="field-input" id="testMinutes" type="number" min="10" max="50" value="10" />
-      <label class="field-label" for="testLang">Language</label>
-      <select class="field-input" id="testLang">
-        <option value="hi">Hindi</option>
-        <option value="en">English</option>
-      </select>
-      <div id="testSheetWrap" hidden>
-        <label class="field-label" for="testSheetText">Sheet text</label>
-        <textarea class="field-input field-textarea" id="testSheetText" rows="4" placeholder="Paste the sheet text"></textarea>
-      </div>
-      <button class="btn-primary btn-glass-color" id="testGenerateBtn" type="button">Generate test</button>
-      <p class="muted small" id="testGenStatus"></p>
-    </div>
-
     <div class="card">
       <h3>Saved tests</h3>
       <div id="savedTestsList"></div>
@@ -237,6 +207,11 @@
       <button class="btn-secondary" id="viewerNextBtn" type="button">Next</button>
     </div>
   </section>
+
+<!-- ================= Row 3-dot menu (Mark as complete, v1.0.14) ================= -->
+<div class="row-menu" id="rowMenu" hidden>
+  <button class="chat-menu-item" id="rowMenuComplete" type="button">Mark as complete</button>
+</div>
 
 <!-- ================= Bottom nav (floating frosted glass) ================= -->
 <nav class="bottom-nav" id="bottomNav" hidden>

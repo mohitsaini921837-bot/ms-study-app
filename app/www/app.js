@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 14;
+var CURRENT_VERSION_CODE = 15;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -369,6 +369,7 @@ function enterApp() {
   $('activeChip').hidden = false;
   $('adminBtn').hidden = (window.MsStudySession.role !== 'admin');
   showScreen('screen-notes');
+  loadCompletions(); // v1.0.14: green ticks for Mark as Complete
   startRevalidation();
   startLivePoll();
   checkForUpdate();
@@ -474,6 +475,58 @@ async function apiCall(path, extra) {
   if (data && data.result === 'unavailable') { throw new Error('Try again.'); }
   if (!res.ok) { throw new Error('Try again.'); }
   return data;
+}
+
+/* ================= Mark as Complete (v1.0.14) ================= */
+/* Every folder / section / note / practice sheet has a 3-dot menu with
+ * "Mark as complete" — a green tick shows on the row. The completion is
+ * stored on the server keyed by the PASSWORD (hash), NOT the device, so
+ * the tick survives logout/login AND logging in on another phone with
+ * the same password. */
+var completions = {}; // "type:id" -> true
+
+async function loadCompletions() {
+  try {
+    var data = await apiCall('/complete/list', {});
+    completions = {};
+    (data.completions || []).forEach(function (c) {
+      if (c && c.item_type && c.item_id) { completions[c.item_type + ':' + c.item_id] = true; }
+    });
+  } catch (e) { /* silent: ticks just don't show until the next load */ }
+}
+
+function isComplete(itemType, itemId) { return !!completions[itemType + ':' + itemId]; }
+
+async function toggleComplete(itemType, itemId) {
+  var done = isComplete(itemType, itemId);
+  try {
+    var data = await apiCall(done ? '/complete/unmark' : '/complete/mark', { itemType: itemType, itemId: itemId });
+    if (data && data.result === 'ok') {
+      if (done) { delete completions[itemType + ':' + itemId]; } else { completions[itemType + ':' + itemId] = true; }
+      refreshCurrentScreen(true).catch(function () { /* silent */ });
+    }
+  } catch (e) { /* silent */ }
+}
+
+/* The 3-dot row menu (one shared popup). Tapping ⋮ on any folder /
+ * section / note / sheet opens it near the button; the single option
+ * toggles that row's completion. */
+var rowMenuTarget = null; // {type, id}
+function openRowMenu(type, id, anchorEl) {
+  rowMenuTarget = { type: type, id: id };
+  $('rowMenuComplete').textContent = isComplete(type, id) ? 'Mark as incomplete' : 'Mark as complete';
+  var menu = $('rowMenu');
+  menu.hidden = false;
+  var r = anchorEl.getBoundingClientRect();
+  menu.style.top = Math.min(window.innerHeight - 110, r.bottom + 6) + 'px';
+  menu.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+  pushBack({ kind: 'rowmenu', undo: closeRowMenu });
+}
+function closeRowMenu() {
+  removeBackEntry('rowmenu');
+  rowMenuTarget = null;
+  var m = $('rowMenu');
+  if (m) { m.hidden = true; }
 }
 
 /* ================= Folder browser (Notes / Tests / Practice / Classes) ================= */
@@ -595,8 +648,9 @@ function createBrowser(opts) {
       if (items.length === 0) { html = '<p class="muted">Empty.</p>'; }
       items.forEach(function (it) {
         // FIX 7 (v1.0.12): items open in the in-app viewer — never Drive.
-        html += '<button type="button" class="row-item" data-item="1" data-item-id="' + esc(it.id || '') + '" data-item-kind="' + esc(it.kind || '') + '" data-item-title="' + esc(it.title || '') + '" data-item-file="' + esc(it.drive_file_id || '') + '">' +
-          esc(it.title || '') + '</button>';
+        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-item="1" data-item-id="' + esc(it.id || '') + '" data-item-kind="' + esc(it.kind || '') + '" data-item-title="' + esc(it.title || '') + '" data-item-file="' + esc(it.drive_file_id || '') + '">' +
+          (isComplete('item', it.id) ? '<span class="complete-tick">✓</span> ' : '') + esc(it.title || '') + '</button>' +
+          '<button type="button" class="row-dot" data-dot-type="item" data-dot-id="' + esc(it.id || '') + '" aria-label="Options">⋮</button></div>';
       });
       html += uploadCardsHtml(sectionId);
       box.innerHTML = html;
@@ -751,7 +805,8 @@ function createBrowser(opts) {
       var html = '';
       var isAdmin = window.MsStudySession.role === 'admin';
       folders.forEach(function (f) {
-        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-folder="' + esc(f.id) + '">📁 ' + esc(f.name) + '</button>' +
+        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-folder="' + esc(f.id) + '">' + (isComplete('folder', f.id) ? '<span class="complete-tick">✓</span> ' : '') + '📁 ' + esc(f.name) + '</button>' +
+          '<button type="button" class="row-dot" data-dot-type="folder" data-dot-id="' + esc(f.id) + '" aria-label="Options">⋮</button>' +
           (isAdmin ? '<button type="button" class="row-del" data-del-folder="' + esc(f.id) + '" aria-label="Delete folder">×</button>' : '') + '</div>';
       });
       sections.forEach(function (s) {
@@ -764,14 +819,16 @@ function createBrowser(opts) {
         if (single) {
           openAttrs = ' data-open-item="1" data-item-kind="' + esc(single.kind || '') + '" data-item-title="' + esc(single.title || '') + '" data-item-file="' + esc(single.drive_file_id || '') + '"';
         }
-        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-section="' + esc(s.id) + '"' + openAttrs + '>▸ ' + esc(s.name) + '</button>' +
+        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-section="' + esc(s.id) + '"' + openAttrs + '>' + (isComplete('section', s.id) ? '<span class="complete-tick">✓</span> ' : '') + '▸ ' + esc(s.name) + '</button>' +
+          '<button type="button" class="row-dot" data-dot-type="section" data-dot-id="' + esc(s.id) + '" aria-label="Options">⋮</button>' +
           (isAdmin ? '<button type="button" class="row-del" data-del-section="' + esc(s.id) + '" aria-label="Delete section">×</button>' : '') + '</div>';
         html += '<div class="section-items" id="' + opts.list + '-sec-' + esc(s.id) + '" hidden></div>';
       });
       items.forEach(function (it) {
         // FIX 7 (v1.0.12): items open in the in-app viewer — never Drive.
-        html += '<button type="button" class="row-item" data-item="1" data-item-id="' + esc(it.id || '') + '" data-item-kind="' + esc(it.kind || '') + '" data-item-title="' + esc(it.title || '') + '" data-item-file="' + esc(it.drive_file_id || '') + '">' +
-          esc(it.title || '') + '</button>';
+        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-item="1" data-item-id="' + esc(it.id || '') + '" data-item-kind="' + esc(it.kind || '') + '" data-item-title="' + esc(it.title || '') + '" data-item-file="' + esc(it.drive_file_id || '') + '">' +
+          (isComplete('item', it.id) ? '<span class="complete-tick">✓</span> ' : '') + esc(it.title || '') + '</button>' +
+          '<button type="button" class="row-dot" data-dot-type="item" data-dot-id="' + esc(it.id || '') + '" aria-label="Options">⋮</button></div>';
       });
       if (!html) { html = '<p class="muted">Empty.</p>'; }
       list.innerHTML = html;
@@ -813,6 +870,10 @@ function createBrowser(opts) {
     var list = $(opts.list);
     if (list) {
       list.addEventListener('click', function (ev) {
+        // v1.0.14: the 3-dot menu — checked FIRST so tapping ⋮ never
+        // opens the folder/section/item underneath it.
+        var dot = ev.target.closest('[data-dot-type]');
+        if (dot) { openRowMenu(dot.getAttribute('data-dot-type'), dot.getAttribute('data-dot-id'), dot); return; }
         var df = ev.target.closest('[data-del-folder]');
         if (df) { deleteFolder(df.getAttribute('data-del-folder')); return; }
         var ds = ev.target.closest('[data-del-section]');
@@ -977,9 +1038,11 @@ $('viewerNextBtn').addEventListener('click', function () {
 var notesBrowser = createBrowser({ crumb: 'notesCrumb', list: 'notesList', kind: 'note', create: 'notesCreate', scope: 'notes' });
 var practiceBrowser = createBrowser({ crumb: 'practiceCrumb', list: 'practiceList', kind: 'sheet', create: 'practiceCreate', scope: 'practice' });
 
-/* ================= Tests screen: AI test form + saved tests ================= */
+/* ================= Tests screen: saved tests ================= */
+/* v1.0.14 (user order 2026-11-25): AI test generation REMOVED entirely —
+ * tests are now uploaded manually (checked answers) and visible to all.
+ * The AI form is gone from the app; this only refreshes saved tests. */
 function refreshTestsScreen() {
-  $('aiTestForm').hidden = false; // AI test creation is open to every logged-in user (v1.0.12)
   refreshSavedTests();
 }
 
@@ -1104,57 +1167,9 @@ $('testChoiceDialog').addEventListener('click', function (ev) {
   if (ev.target === $('testChoiceDialog')) { closeTestChoice(); }
 });
 
-$('testType').addEventListener('change', function () {
-  $('testSheetWrap').hidden = ($('testType').value !== 'sheet');
-});
-
-$('testQuestions').addEventListener('input', function () {
-  var n = parseInt($('testQuestions').value, 10);
-  if (isFinite(n)) { $('testMinutes').value = Math.max(10, Math.min(50, n)); }
-});
-
-function clampQuestions(v) {
-  var n = parseInt(v, 10);
-  if (!isFinite(n)) { n = 10; }
-  n = Math.round(n / 5) * 5;
-  return Math.max(10, Math.min(50, n));
-}
-
-function clampMinutes(v) {
-  var n = parseInt(v, 10);
-  if (!isFinite(n)) { n = 10; }
-  return Math.max(10, Math.min(50, n));
-}
-
-$('testGenerateBtn').addEventListener('click', async function () {
-  var topic = ($('testTopic').value || '').trim();
-  if (!topic) { $('testGenStatus').textContent = 'Enter a topic.'; return; }
-  var btn = $('testGenerateBtn');
-  btn.disabled = true;
-  $('testGenStatus').textContent = 'Generating…';
-  try {
-    var type = $('testType').value;
-    var data = await apiCall('/tests/generate', {
-      type: type,
-      topic: topic,
-      subject: ($('testSubject').value || '').trim(),
-      numQuestions: clampQuestions($('testQuestions').value),
-      minutes: clampMinutes($('testMinutes').value),
-      language: $('testLang').value,
-      sheetText: (type === 'sheet') ? ($('testSheetText').value || '') : ''
-    });
-    if (data && data.result === 'ok') {
-      $('testGenStatus').textContent = 'Test ready.';
-      refreshSavedTests();
-    } else {
-      $('testGenStatus').textContent = 'Try again.';
-    }
-  } catch (e) {
-    $('testGenStatus').textContent = e.message || 'Try again.';
-  } finally {
-    btn.disabled = false;
-  }
-});
+/* v1.0.14 (user order 2026-11-25): AI test generation removed — the
+ * form, its listeners and the /tests/generate call are all gone. Tests
+ * are uploaded manually now and visible to everyone. */
 
 /* ================= Take a test ================= */
 /* One question at a time, countdown from duration_min, score computed
@@ -2248,6 +2263,18 @@ $('chatSendBtn').addEventListener('click', sendChatMessage);
 $('chatNotifStatus').addEventListener('click', async function () {
   await ensurePushRegistered();
   updateChatNotifStatus();
+});
+// v1.0.14: the row 3-dot menu option toggles Mark as complete.
+$('rowMenuComplete').addEventListener('click', async function () {
+  if (!rowMenuTarget) { return; }
+  var t = rowMenuTarget;
+  closeRowMenu();
+  await toggleComplete(t.type, t.id);
+});
+// Tapping anywhere outside the row menu closes it.
+document.addEventListener('click', function (ev) {
+  var m = $('rowMenu');
+  if (m && !m.hidden && !ev.target.closest('#rowMenu') && !ev.target.closest('[data-dot-type]')) { closeRowMenu(); }
 });
 $('chatInput').addEventListener('keydown', function (ev) {
   if (ev.key === 'Enter') { sendChatMessage(); }
