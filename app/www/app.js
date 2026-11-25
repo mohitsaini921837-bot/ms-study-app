@@ -31,7 +31,7 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 19;
+var CURRENT_VERSION_CODE = 20;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
@@ -1102,8 +1102,20 @@ function testCategoryOf(t) {
 function testChapterOf(t) {
   return (t.chapter || '').toString();
 }
+/* v1.0.19: the Chapter Test / Sectional Test tabs are back on top.
+ * A chapter test always has a chapter; a sectional test has none —
+ * that is how the tabs split the tests. */
+function isChapterTest(t) {
+  return testChapterOf(t).trim().length > 0;
+}
+function tabTests() {
+  var tab = window.__testsTab || 'chapter';
+  return allTestsCache.filter(function (t) {
+    return tab === 'chapter' ? isChapterTest(t) : !isChapterTest(t);
+  });
+}
 function testsForExam(exam) {
-  return allTestsCache.filter(function (t) { return testExamOf(t) === exam; });
+  return tabTests().filter(function (t) { return testExamOf(t) === exam; });
 }
 function testsForSubject(exam, subject) {
   return testsForExam(exam).filter(function (t) { return testCategoryOf(t) === subject; });
@@ -1133,9 +1145,10 @@ async function refreshSavedTests(silent) {
     var data = await apiCall('/tests/list', {});
     var tests = (data && data.tests) || [];
     allTestsCache = tests;
-    if (tests.length === 0) { list.innerHTML = '<p class="muted">No tests.</p>'; return; }
-    // Exam folders — full name only, NO counts.
-    var exams = uniqueSorted(tests.map(function (t) { return testExamOf(t); }));
+    var tabList = tabTests();
+    if (tabList.length === 0) { list.innerHTML = '<p class="muted">No tests yet.</p>'; return; }
+    // Exam folders for THIS tab — full name only, NO counts.
+    var exams = uniqueSorted(tabList.map(function (t) { return testExamOf(t); }));
     list.innerHTML = exams.map(function (ex) { return navRowHtml(ex, 'data-test-exam', ex); }).join('');
     // Per-test last-attempt checks (a silent poll skips them — the
     // attempt state is already known from the initial load).
@@ -1263,6 +1276,24 @@ function openTestChapter(chapter) {
 $('testSubjectsBackBtn').addEventListener('click', goBackOneStep);
 $('testChaptersBackBtn').addEventListener('click', goBackOneStep);
 $('testListBackBtn').addEventListener('click', goBackOneStep);
+
+/* v1.0.19: Chapter Test / Sectional Test tabs are back on top (user
+ * order 2026-11-25). Switching tabs resets the navigation and shows
+ * that tab's exams. */
+$('testsTabs').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-tests-tab]');
+  if (!b) { return; }
+  var tab = b.getAttribute('data-tests-tab');
+  if (window.__testsTab === tab) { return; }
+  window.__testsTab = tab;
+  testsNav = { exam: null, subject: null, chapter: null };
+  clearBackStack();
+  document.querySelectorAll('#testsTabs .tests-tab').forEach(function (el) {
+    el.classList.toggle('tests-tab-active', el.getAttribute('data-tests-tab') === tab);
+  });
+  showScreen('screen-tests');
+  refreshSavedTests(true);
+});
 
 $('savedTestsList').addEventListener('click', function (ev) {
   var ex = ev.target.closest('[data-test-exam]');
