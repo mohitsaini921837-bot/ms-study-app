@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light" />
+<link rel="icon" href="icon.png" />
+<title>MS Study</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ================= Header ================= -->
+<!-- Logo sits TOP-LEFT. Long-press it (3s) to open the hidden chat entry. -->
+<header class="app-header" id="appHeader">
+  <img class="app-logo" id="appLogo" src="icon.png" alt="MS Study logo" />
+  <div class="app-title-wrap">
+    <div class="app-title" id="appTitle">MS Study</div>
+  </div>
+  <div class="header-spacer"></div>
+  <span class="active-chip" id="activeChip" hidden><span class="active-dot"></span>Active</span>
+  <button class="icon-btn" id="adminBtn" type="button" hidden title="Admin">Admin</button>
+</header>
+
+<main class="app-main" id="appMain">
+
+  <!-- ================= Password gate ================= -->
+  <section class="screen" id="screen-lock">
+    <div class="lock-wrap">
+      <img class="lock-logo" src="icon.png" alt="MS Study" />
+      <h1 class="lock-title">MS Study</h1>
+      <p class="lock-sub">Enter your access password</p>
+      <div class="card lock-card" id="lockCard">
+        <div class="error-box" id="lockError" hidden>
+          <div class="error-title" id="lockErrorTitle"></div>
+          <div class="error-text" id="lockErrorText"></div>
+        </div>
+        <label class="field-label" for="lockPassword">Access password</label>
+        <input class="field-input" id="lockPassword" type="password" placeholder="Enter password"
+               autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button class="btn-primary btn-glass-color" id="lockBtn" type="button">Sign In</button>
+      </div>
+      <div class="checking" id="lockChecking" hidden>
+        <div class="spinner"></div>
+        <div class="checking-title">Verifying…</div>
+      </div>
+      <p class="lock-foot">Works only on this device.</p>
+    </div>
+  </section>
+
+  <!-- ================= Notes ================= -->
+  <section class="screen" id="screen-notes" hidden>
+    <div class="section-head"><h2>Notes</h2></div>
+    <div class="crumb" id="notesCrumb"></div>
+    <div class="browser-create" id="notesCreate" hidden></div>
+    <div id="notesList"></div>
+  </section>
+
+  <!-- ================= Tests ================= -->
+  <section class="screen" id="screen-tests" hidden>
+    <div class="section-head"><h2>Tests</h2></div>
+
+    <div class="tests-tabs" id="testsTabs">
+      <button type="button" class="tests-tab tests-tab-active" data-tests-tab="chapter">Chapter Test</button>
+      <button type="button" class="tests-tab" data-tests-tab="sectional">Sectional Test</button>
+    </div>
+
+    <div class="card">
+      <h3>Exams</h3>
+      <div id="savedTestsList"></div>
+      <p class="muted small" id="testDetail"></p>
+    </div>
+
+  </section>
+
+  <!-- v1.0.18: test navigation is page-based — every level opens a NEW
+       page (no expand/collapse). Exam → Subject → Chapter → Test. -->
+  <section class="screen" id="screen-test-subjects" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="testSubjectsBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="testSubjectsTitle"></h2>
+    <div class="card">
+      <h3>Subjects</h3>
+      <div id="testSubjectList"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-test-chapters" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="testChaptersBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="testChaptersTitle"></h2>
+    <div class="card">
+      <h3>Chapters</h3>
+      <div id="testChapterList"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-test-list" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="testListBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="testListTitle"></h2>
+    <div class="card">
+      <h3>Tests</h3>
+      <div id="testList"></div>
+      <p class="muted small" id="testListDetail"></p>
+    </div>
+  </section>
+
+  <!-- ================= Take test ================= -->
+  <section class="screen" id="screen-take" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="takeBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="takeTitle"></h2>
+    <p class="muted small" id="takeTimer"></p>
+
+    <!-- v1.0.15: pre-test instructions (Vidyagram-style) -->
+    <div id="takeIntro" hidden>
+      <div class="card">
+        <h3>Instructions</h3>
+        <p class="muted small" id="takeIntroDetail"></p>
+        <p class="muted small">• Answer each question, then tap Next. You can go back with Previous.</p>
+        <p class="muted small">• Tap an option again to clear it, or use Clear.</p>
+        <p class="muted small">• Mark for Review flags a question to come back to — it still counts as answered if you answered it.</p>
+        <p class="muted small take-intro-testonly">• Wrong answers lose marks (negative marking). The test auto-submits when the time ends.</p>
+        <p class="muted small take-intro-testonly">• You can pause the test — the timer freezes while paused.</p>
+        <button class="btn-primary btn-glass-color" id="takeStartBtn" type="button">I am ready to begin</button>
+      </div>
+    </div>
+
+    <div id="takeBody">
+      <div class="take-topbar">
+        <button class="btn-secondary take-palette-btn" id="takePaletteBtn" type="button">☰ All questions</button>
+        <span class="take-zoom">
+          <button class="btn-secondary take-zoom-btn" id="takeZoomOutBtn" type="button" aria-label="Smaller text">A−</button>
+          <button class="btn-secondary take-zoom-btn" id="takeZoomInBtn" type="button" aria-label="Larger text">A+</button>
+        </span>
+        <button class="btn-secondary take-pause-btn" id="takePauseBtn" type="button">⏸ Pause</button>
+      </div>
+      <p class="muted small" id="takeMarks"></p>
+      <p class="muted small" id="takeProgress"></p>
+      <p class="muted small" id="takeAnsweredCount"></p>
+      <p id="takeQuestion"></p>
+      <div id="takeOptions"></div>
+      <div id="takeSolution" class="take-solution" hidden></div>
+      <div class="take-nav">
+        <button class="btn-secondary" id="takePrevBtn" type="button">Previous</button>
+        <button class="btn-secondary" id="takeClearBtn" type="button">Clear</button>
+        <button class="btn-secondary" id="takeMarkBtn" type="button">Mark for Review</button>
+        <button class="btn-primary btn-glass-color" id="takeNextBtn" type="button">Next</button>
+      </div>
+      <button class="btn-primary take-submit btn-glass-color" id="takeSubmitBtn" type="button">Submit</button>
+    </div>
+
+    <!-- v1.0.15: pause overlay (timer frozen, summary, resume) -->
+    <div class="dialog-overlay" id="takePauseOverlay" hidden>
+      <div class="dialog-card">
+        <h3>Test paused</h3>
+        <p class="muted small" id="takePauseSummary"></p>
+        <button class="btn-primary btn-glass-color" id="takeResumeBtn" type="button">Resume Test</button>
+      </div>
+    </div>
+
+    <div id="takeResult" hidden>
+      <div id="takeSummary"></div>
+      <p id="takeScore"></p>
+      <div class="take-review-filters" id="takeReviewFilters" hidden>
+        <button class="btn-secondary take-filter-btn" data-review-filter="all" type="button">All</button>
+        <button class="btn-secondary take-filter-btn" data-review-filter="correct" type="button">Correct</button>
+        <button class="btn-secondary take-filter-btn" data-review-filter="incorrect" type="button">Incorrect</button>
+        <button class="btn-secondary take-filter-btn" data-review-filter="unattempted" type="button">Unattempted</button>
+        <button class="btn-secondary take-filter-btn" data-review-filter="marked" type="button">Marked</button>
+      </div>
+      <div id="takeReview"></div>
+      <button class="btn-primary btn-glass-color" id="takeDoneBtn" type="button">Back to tests</button>
+    </div>
+  </section>
+
+  <!-- ================= Practice ================= -->
+  <section class="screen" id="screen-practice" hidden>
+    <div class="section-head"><h2>Practice</h2></div>
+    <div class="card">
+      <h3>Question Sets</h3>
+      <div id="practiceSetList"></div>
+      <p class="muted small" id="practiceSetDetail"></p>
+    </div>
+    <div class="crumb" id="practiceCrumb"></div>
+    <div class="browser-create" id="practiceCreate" hidden></div>
+    <div id="practiceList"></div>
+  </section>
+
+  <!-- ================= Practice sub-pages (v1.0.20, mirror of the test pages) ================= -->
+  <section class="screen" id="screen-practice-subjects" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="practiceSubjectsBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="practiceSubjectsTitle"></h2>
+    <div class="card">
+      <h3>Subjects</h3>
+      <div id="practiceSubjectList"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-practice-chapters" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="practiceChaptersBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="practiceChaptersTitle"></h2>
+    <div class="card">
+      <h3>Chapters</h3>
+      <div id="practiceChapterList"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-practice-list" hidden>
+    <div class="section-head">
+      <button class="btn-ghost" id="practiceListBackBtn" type="button">← Back</button>
+    </div>
+    <h2 id="practiceListTitle"></h2>
+    <div class="card">
+      <h3>Practice sets</h3>
+      <div id="practiceSetsList"></div>
+      <p class="muted small" id="practiceSetsDetail"></p>
+    </div>
+  </section>
+
+  <!-- ================= Admin (role === 'admin' only) ================= -->
+  <section class="screen" id="screen-admin" hidden>
+    <div class="section-head">
+      <h2>Admin</h2>
+      <button class="btn-ghost" id="adminBackBtn" type="button">← Back</button>
+    </div>
+
+    <div class="card">
+      <h3>Create password</h3>
+      <input class="field-input" id="adminCustomPw" type="text" placeholder="Custom password (empty = random)" maxlength="32" autocomplete="off">
+      <button class="btn-primary btn-glass-color" id="adminCreateBtn" type="button">Create password</button>
+      <div class="code-card" id="adminCreateResult" hidden>
+        <div class="code-label">New password</div>
+        <div class="code-value" id="adminNewCodeText"></div>
+        <button class="btn-secondary" id="adminCopyBtn" type="button">Copy</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Passwords</h3>
+      <button class="btn-secondary" id="adminRefreshBtn" type="button">Refresh</button>
+      <div class="table-wrap">
+        <table class="admin-table">
+          <thead><tr><th>Role</th><th>Device</th><th>Label</th><th>Last used</th><th>Active</th><th></th></tr></thead>
+          <tbody id="adminPasswordsBody">
+            <tr><td colspan="6" class="muted">No passwords.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= Hidden chat — lock ================= -->
+  <section class="screen" id="screen-chat-lock" hidden>
+    <div class="lock-wrap">
+      <h2 id="chatLockTitle">Enter chat code</h2>
+      <div class="card lock-card" id="chatLockCard">
+        <div class="error-box" id="chatLockError" hidden>
+          <div class="error-title">Incorrect code</div>
+        </div>
+        <label class="field-label" for="chatCodeInput">Chat code</label>
+        <input class="field-input" id="chatCodeInput" type="password" placeholder="Enter code"
+               autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <div id="chatCodeConfirmWrap" hidden>
+          <label class="field-label" for="chatCodeConfirm">Confirm code</label>
+          <input class="field-input" id="chatCodeConfirm" type="password" placeholder="Confirm code"
+                 autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </div>
+        <button class="btn-primary btn-glass-color" id="chatLockBtn" type="button">Open chat</button>
+      </div>
+      <p class="muted small" id="chatLockStatus"></p>
+      <button class="btn-ghost" id="chatLockBackBtn" type="button">← Back</button>
+    </div>
+  </section>
+
+  <!-- ================= Hidden chat ================= -->
+  <section class="screen" id="screen-chat" hidden>
+    <div class="chat-wrap">
+      <div class="chat-head">
+        <button class="btn-ghost" id="chatBackBtn" type="button">← Back</button>
+        <div class="chat-peer">
+          <div class="chat-title">Chat</div>
+          <div class="chat-presence"><span class="presence-dot" id="chatPresenceDot"></span><span id="chatPresenceText"></span></div>
+        </div>
+        <button class="icon-btn" id="chatMenuBtn" type="button" title="Menu">⋮</button>
+      </div>
+      <div class="chat-menu" id="chatMenu" hidden>
+        <button class="chat-menu-item chat-menu-danger" id="chatChangeCodeBtn" type="button">Change code</button>
+      </div>
+      <div class="chat-list" id="chatList"></div>
+      <div class="chat-reply" id="chatReplyBar" hidden>
+        <span class="chat-reply-text" id="chatReplyText"></span>
+        <button class="chat-reply-x" id="chatReplyCancel" type="button" aria-label="Cancel reply">✕</button>
+      </div>
+      <p class="muted small" id="chatStatus"></p>
+      <p class="muted small" id="chatNotifStatus" style="cursor:pointer;"></p>
+      <div class="chat-composer">
+        <input class="field-input chat-input" id="chatInput" type="text" placeholder="Message"
+               autocomplete="off" autocapitalize="sentences" spellcheck="false" />
+        <button class="btn-primary chat-send btn-glass-color" id="chatSendBtn" type="button">Send</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ================= In-app PDF viewer (FIX 7, v1.0.12) ================= -->
+  <section class="viewer-screen" id="screen-viewer" hidden>
+    <div class="viewer-bar">
+      <button class="btn-ghost" id="viewerCloseBtn" type="button">← Back</button>
+      <span class="viewer-title" id="viewerTitle"></span>
+    </div>
+    <div class="viewer-canvas-wrap" id="viewerWrap">
+      <canvas id="viewerCanvas" hidden></canvas>
+      <img id="viewerImg" alt="" hidden>
+      <p class="muted" id="viewerError" hidden>Could not open this file.</p>
+    </div>
+    <div class="viewer-nav" id="viewerNav" hidden>
+      <button class="btn-secondary" id="viewerPrevBtn" type="button">Previous</button>
+      <span class="viewer-page" id="viewerPageLabel"></span>
+      <button class="btn-secondary" id="viewerNextBtn" type="button">Next</button>
+    </div>
+  </section>
+
+<!-- ================= Row 3-dot menu (Mark as complete, v1.0.14) ================= -->
+<div class="row-menu" id="rowMenu" hidden>
+  <button class="chat-menu-item" id="rowMenuComplete" type="button">Mark as complete</button>
+</div>
+
+<!-- ================= Bottom nav (floating frosted glass) ================= -->
+<nav class="bottom-nav" id="bottomNav" hidden>
+  <button class="nav-btn active" id="navNotes" type="button" data-screen="screen-notes"><span class="nav-icon">📚</span><span class="nav-label">Notes</span></button>
+  <button class="nav-btn" id="navTests" type="button" data-screen="screen-tests"><span class="nav-icon">📝</span><span class="nav-label">Tests</span></button>
+  <button class="nav-btn" id="navPractice" type="button" data-screen="screen-practice"><span class="nav-icon">✏️</span><span class="nav-label">Practice</span></button>
+</nav>
+
+<!-- ================= In-app update dialog ================= -->
+<div class="dialog-overlay" id="updateDialog" hidden>
+  <div class="card dialog-card">
+    <h2 id="updateTitle">Update available</h2>
+    <p class="muted" id="updateChangelog"></p>
+    <div class="dialog-actions">
+      <button class="btn-primary btn-glass-color" id="updateBtn" type="button">Update</button>
+      <button class="btn-ghost" id="updateLaterBtn" type="button">Later</button>
+    </div>
+    <p class="muted small" id="updateStatus"></p>
+  </div>
+</div>
+
+<!-- ================= Chat message menu (long-press) ================= -->
+<div class="dialog-overlay" id="chatMsgMenu" hidden>
+  <div class="card dialog-card morph-menu">
+    <button class="btn-secondary chat-menu-action" id="chatMsgReplyBtn" type="button">Reply</button>
+    <button class="btn-secondary chat-menu-action chat-menu-danger" id="chatMsgDeleteBtn" type="button">Delete</button>
+    <button class="btn-ghost" id="chatMsgMenuCancel" type="button">Cancel</button>
+  </div>
+</div>
+
+<!-- ================= Question palette (during a test) ================= -->
+<div class="dialog-overlay" id="takePalette" hidden>
+  <div class="card dialog-card take-palette-card">
+    <h3>Questions</h3>
+    <p class="muted small" id="takePaletteSummary"></p>
+    <div class="take-palette-grid" id="takePaletteGrid"></div>
+    <div class="dialog-actions">
+      <button class="btn-ghost" id="takePaletteCloseBtn" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= Re-attempt / View Results (saved test) ================= -->
+<div class="dialog-overlay" id="testChoiceDialog" hidden>
+  <div class="card dialog-card">
+    <h3 id="testChoiceTitle"></h3>
+    <p class="muted small" id="testChoiceMeta"></p>
+    <div class="dialog-actions take-choice-actions">
+      <button class="btn-primary btn-glass-color" id="testReattemptBtn" type="button">Re-attempt</button>
+      <button class="btn-secondary" id="testViewResultBtn" type="button">View Results</button>
+      <button class="btn-ghost" id="testChoiceCancelBtn" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= Toast ================= -->
+<div class="toast" id="toast" hidden></div>
+
+<script src="vendor/pdfjs/pdf.min.js"></script>
+<script src="drive.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
