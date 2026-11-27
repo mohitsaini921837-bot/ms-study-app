@@ -95,25 +95,25 @@ jobs:
 
       - name: Rename APK
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk MS-Study-v1.0.21.apk
-          ls -l MS-Study-v1.0.21.apk
+          cp android/app/build/outputs/apk/release/app-release.apk MS-Study-v1.0.23.apk
+          ls -l MS-Study-v1.0.23.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ms-study-v1.0.21-apk
-          path: app/MS-Study-v1.0.21.apk
+          name: ms-study-v1.0.23-apk
+          path: app/MS-Study-v1.0.23.apk
           if-no-files-found: error
 
-      - name: Create GitHub Release v1.0.21
+      - name: Create GitHub Release v1.0.23
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd "$GITHUB_WORKSPACE"
-          if gh release view v1.0.21 >/dev/null 2>&1; then
-            gh release upload v1.0.21 app/MS-Study-v1.0.21.apk --clobber
+          if gh release view v1.0.23 >/dev/null 2>&1; then
+            gh release upload v1.0.23 app/MS-Study-v1.0.23.apk --clobber
           else
-            gh release create v1.0.21 app/MS-Study-v1.0.21.apk \
-              --title "MS Study v1.0.21" \
-              --notes "Practice question sets (UPSI Reasoning, instant results) — chapter page fix."
+            gh release create v1.0.23 app/MS-Study-v1.0.23.apk \
+              --title "MS Study v1.0.23" \
+              --notes "No-password release — deviceId-only access, Mark as Complete on test and practice cards, hidden chat entry."
           fi
