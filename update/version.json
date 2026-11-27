@@ -1,9 +1,1 @@
-{
-  "apkUrl": "https://mohitsaini921837-bot.github.io/ms-study-app/update/MS-Study-v1.0.24.apk",
-  "changelog": "No more blinking \u2014 lists now load instantly from cache and only change when the data changes. Notes is a clean user screen (no Add folder, no delete buttons, no uploads). Mark as Complete works on every row. Chat notifications are wired up (needs the server key \u2014 see notes).",
-  "version": "1.0.24",
-  "versionCode": 25,
-  "wwwBuild": 33,
-  "wwwSha256": "e212659cbc592a817313c6ce8033bcd8f5ffa67a544ee6933f215f4b4c5d7435",
-  "wwwUrl": "https://mohitsaini921837-bot.github.io/ms-study-app/update/MS-Study-www-33.zip"
-}
+{"apkUrl":"https://mohitsaini921837-bot.github.io/ms-study-app/update/MS-Study-v1.0.24.apk","changelog":"No more blinking — lists now load instantly from cache and only change when the data changes. Notes is a clean user screen (no Add folder, no delete buttons, no uploads). Mark as Complete works on every row. Chat notifications are wired up (needs the server key — see notes).","version":"1.0.24","versionCode":25,"wwwBuild":34,"wwwSha256":"3aceccc966c62bc4214b32dc65837bdbee033373149ad042351fd418c8d14bd7","wwwUrl":"https://mohitsaini921837-bot.github.io/ms-study-app/update/MS-Study-www-34.zip"}
