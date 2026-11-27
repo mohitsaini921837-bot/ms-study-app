@@ -86,7 +86,7 @@ body::before {
  * row — and the aurora behind them never stops moving, so the blur
  * re-sampled even between scrolls. Blur is therefore REMOVED from the
  * scrolling-list surfaces only (.row-item, .row-del, .row-dot,
- * .test-card, .upload-card, .take-review-item, .take-palette-num,
+ * .test-card, .take-review-item, .take-palette-num,
  * .msg-mine/.msg-theirs, .btn-primary/.btn-secondary inside cards);
  * they keep the exact same rgba background, border, radius, shadow
  * and spacing — only the per-frame blur cost is gone. Blur is KEPT on
@@ -247,7 +247,7 @@ p { margin: 0 0 12px; line-height: 1.55; }
 }
 /* Primary = colourful liquid glass (glass-kit ref): purple -> blue -> teal
    translucent gradient, bright glass edge, coloured glow. Applies to every
-   .btn-primary, including the Upload buttons app.js creates. */
+   .btn-primary, wherever app.js creates one. */
 .btn-primary, .btn-glass-color {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.55);
@@ -332,7 +332,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
   transition: var(--morph);
 }
 .admin-table .row-btn:active { transform: scale(1.05, 0.92); border-radius: 999px; }
-.upload-result { margin-top: 14px; }
 .success-text { color: var(--green); font-weight: 700; margin-bottom: 12px; }
 
 /* ---------- Folder browser / rows ---------- */
@@ -456,28 +455,8 @@ p { margin: 0 0 12px; line-height: 1.55; }
 .browser-create .row-form + .row-form { margin-top: 10px; }
 .browser-create p { margin: 6px 0 0; }
 
-/* ---------- Upload cards inside an open section ---------- */
-.section-uploads { margin-top: 12px; }
-.upload-card {
-  background: var(--surface-glass);
-  border: 1px solid var(--glass-hi);
-  border-radius: var(--radius-sm);
-  padding: 14px;
-  margin-bottom: 10px;
-  box-shadow: 0 6px 20px rgba(20, 24, 31, 0.06), var(--glow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  transition: var(--morph);
-  transform: translateZ(0);
-  transform-origin: top center;
-  animation: morph-expand 380ms var(--spring);
-}
-.upload-card:active { transform: scale(1.01, 0.98); border-radius: 22px; }
-.section-uploads:not([hidden]) { animation: morph-expand 380ms var(--spring); transform-origin: top center; }
 .browser-create:not([hidden]) { animation: morph-expand 380ms var(--spring); transform-origin: top center; }
 #testSheetWrap:not([hidden]) { animation: morph-expand 380ms var(--spring); transform-origin: top center; }
-.upload-title { font-size: 14px; font-weight: 800; margin-bottom: 10px; }
-.upload-card .field-input { margin-bottom: 10px; }
-.upload-card .btn-primary { width: 100%; }
-.upload-card p { margin: 8px 0 0; }
 
 /* ---------- Bottom nav (floating frosted glass) ---------- */
 .bottom-nav {
@@ -584,7 +563,7 @@ p { margin: 0 0 12px; line-height: 1.55; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .screen, .toast, .dialog-card, .chat-menu, .msg, .section-items, .section-uploads, .upload-card, .browser-create, .code-card, .chat-reply { animation: none; }
+  .screen, .toast, .dialog-card, .chat-menu, .msg, .section-items, .browser-create, .code-card, .chat-reply { animation: none; }
   .spinner { animation-duration: 2s; }
 }
 
