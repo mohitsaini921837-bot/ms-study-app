@@ -3,17 +3,18 @@
  * NO Google Sign-In in the app. NO Drive API key / JSON / service-account
  * credential in any client file. Every Drive operation goes through the
  * MS Study server (SERVER_URL), which holds the service-account key
- * server-side only. The app only ever sends {password, deviceId} plus
- * the file/title/kind/folder/section the admin chose.
+ * server-side only. The app only ever sends {deviceId} plus
+ * the file/title/kind/folder/section the admin chose (v1.0.23:
+ * no password anywhere — deviceId is the only identity).
  *
- * Endpoints (server contract, same auth shape as /validate):
- *   POST {SERVER_URL}/drive/list   {password, deviceId, folderId?}
+ * Endpoints (server contract):
+ *   POST {SERVER_URL}/drive/list   {deviceId, folderId?}
  *   POST {SERVER_URL}/drive/upload multipart FormData
- *        {password, deviceId, file, title, kind, folderId?, sectionId?}
+ *        {deviceId, file, title, kind, folderId?, sectionId?}
  *        kind: "note" | "sheet" | "video"
  *
  * This file only defines window.MsDrive; app.js owns SERVER_URL and
- * the in-memory password. Nothing here stores a password. */
+ * the device id. Nothing here stores a password. */
 
 (function () {
   'use strict';
@@ -26,20 +27,19 @@
   }
 
   function authHeaders() {
-    // Password lives in memory only (app.js). Never persisted here.
+    // Device id only (v1.0.23: no password). Never persisted here
+    // beyond what app.js already holds in memory.
     return {
-      password: window.MsStudySession ? window.MsStudySession.password : '',
       deviceId: window.MsStudySession ? window.MsStudySession.deviceId : ''
     };
   }
 
-  /* Normalize a server result code into a short error. "incorrect" /
-   * "kicked" send the user back to the lock screen (app.js exposes
-   * window.MsStudyLockout for this). Returns an Error or null. */
+  /* Normalize a server result code into a short error.
+   * (v1.0.23: no lock screen exists any more — an auth failure is
+   * just a plain error.) Returns an Error or null. */
   function resultError(data) {
     if (!data || typeof data.result !== 'string') { return null; }
     if (data.result === 'incorrect' || data.result === 'kicked') {
-      if (window.MsStudyLockout) { window.MsStudyLockout(data.result); }
       return new Error('Try again.');
     }
     if (data.result === 'unauthorized') { return new Error('Not allowed.'); }
@@ -65,7 +65,7 @@
   /* List Drive items in a folder (folderId optional = Drive root). */
   async function driveList(folderId) {
     var auth = authHeaders();
-    var body = { password: auth.password, deviceId: auth.deviceId };
+    var body = { deviceId: auth.deviceId };
     if (folderId) { body.folderId = folderId; }
     return postJson('/drive/list', body);
   }
@@ -77,7 +77,6 @@
     if (!file) { throw new Error('No file selected.'); }
     var auth = authHeaders();
     var form = new FormData();
-    form.append('password', auth.password);
     form.append('deviceId', auth.deviceId);
     form.append('file', file);
     form.append('title', title || file.name);

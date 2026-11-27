@@ -19,34 +19,9 @@
   </div>
   <div class="header-spacer"></div>
   <span class="active-chip" id="activeChip" hidden><span class="active-dot"></span>Active</span>
-  <button class="icon-btn" id="adminBtn" type="button" hidden title="Admin">Admin</button>
 </header>
 
 <main class="app-main" id="appMain">
-
-  <!-- ================= Password gate ================= -->
-  <section class="screen" id="screen-lock">
-    <div class="lock-wrap">
-      <img class="lock-logo" src="icon.png" alt="MS Study" />
-      <h1 class="lock-title">MS Study</h1>
-      <p class="lock-sub">Enter your access password</p>
-      <div class="card lock-card" id="lockCard">
-        <div class="error-box" id="lockError" hidden>
-          <div class="error-title" id="lockErrorTitle"></div>
-          <div class="error-text" id="lockErrorText"></div>
-        </div>
-        <label class="field-label" for="lockPassword">Access password</label>
-        <input class="field-input" id="lockPassword" type="password" placeholder="Enter password"
-               autocomplete="off" autocapitalize="off" spellcheck="false" />
-        <button class="btn-primary btn-glass-color" id="lockBtn" type="button">Sign In</button>
-      </div>
-      <div class="checking" id="lockChecking" hidden>
-        <div class="spinner"></div>
-        <div class="checking-title">Verifying…</div>
-      </div>
-      <p class="lock-foot">Works only on this device.</p>
-    </div>
-  </section>
 
   <!-- ================= Notes ================= -->
   <section class="screen" id="screen-notes" hidden>
@@ -239,38 +214,6 @@
       <h3>Practice sets</h3>
       <div id="practiceSetsList"></div>
       <p class="muted small" id="practiceSetsDetail"></p>
-    </div>
-  </section>
-
-  <!-- ================= Admin (role === 'admin' only) ================= -->
-  <section class="screen" id="screen-admin" hidden>
-    <div class="section-head">
-      <h2>Admin</h2>
-      <button class="btn-ghost" id="adminBackBtn" type="button">← Back</button>
-    </div>
-
-    <div class="card">
-      <h3>Create password</h3>
-      <input class="field-input" id="adminCustomPw" type="text" placeholder="Custom password (empty = random)" maxlength="32" autocomplete="off">
-      <button class="btn-primary btn-glass-color" id="adminCreateBtn" type="button">Create password</button>
-      <div class="code-card" id="adminCreateResult" hidden>
-        <div class="code-label">New password</div>
-        <div class="code-value" id="adminNewCodeText"></div>
-        <button class="btn-secondary" id="adminCopyBtn" type="button">Copy</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>Passwords</h3>
-      <button class="btn-secondary" id="adminRefreshBtn" type="button">Refresh</button>
-      <div class="table-wrap">
-        <table class="admin-table">
-          <thead><tr><th>Role</th><th>Device</th><th>Label</th><th>Last used</th><th>Active</th><th></th></tr></thead>
-          <tbody id="adminPasswordsBody">
-            <tr><td colspan="6" class="muted">No passwords.</td></tr>
-          </tbody>
-        </table>
-      </div>
     </div>
   </section>
 

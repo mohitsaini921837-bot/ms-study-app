@@ -362,7 +362,16 @@ p { margin: 0 0 12px; line-height: 1.55; }
   transform: translateZ(0);
 }
 .row-dot:active { transform: scale(1.06, 0.9); border-radius: 999px; }
-.complete-tick { color: #16a34a; font-weight: 800; }
+/* v1.0.23: the completion tick is a white tick inside a small green
+ * circle (never a bare tick), sitting on the RIGHT of its row/card,
+ * next to the 3-dot menu button. */
+.complete-tick {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; align-self: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: #16a34a; color: #fff; font-weight: 800; font-size: 13px; line-height: 1;
+  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.4);
+}
 /* The row 3-dot popup menu (fixed, near the tapped ⋮ button). */
 .row-menu {
   position: fixed; z-index: 60; min-width: 190px;
@@ -403,6 +412,11 @@ p { margin: 0 0 12px; line-height: 1.55; }
   box-shadow: 0 3px 10px rgba(124, 92, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 .test-card-title { font-size: 16px; font-weight: 700; }
+/* v1.0.23: card head row — title left, circled tick + 3-dot right. */
+.test-card-head { display: flex; align-items: flex-start; gap: 8px; }
+.test-card-head .test-card-title { flex: 1; min-width: 0; }
+.test-card-side { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.test-card-dot { flex: 0 0 36px; min-height: 36px; font-size: 20px; }
 .test-card-meta { font-size: 13px; color: var(--muted); font-weight: 600; }
 /* v1.0.18: page-based test navigation — folder rows (name only, no
  * counts) and per-test Attempt / Result / Re-attempt buttons. */

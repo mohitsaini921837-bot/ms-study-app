@@ -1,27 +1,13 @@
-/* MS Study — app shell (Capacitor 6, single-page app).
- *
- *   - Native MsAccess plugin (android/.../MsAccessPlugin.java) does the
- *     /validate POST and holds the encrypted session, exactly like
- *     PW's PwAccessPlugin + PwSessionStore (AES-256/GCM key in the
- *     Android Keystore, ciphertext only in SharedPreferences).
- *   - Difference from PW: the device identity is a UUID generated ONCE
- *     and stored AES-encrypted (MsSessionStore), NOT the Android ID;
- *     and there is NO expiry anywhere — a valid password stays valid
- *     until the server says "kicked"/"incorrect".
- *   - Plain-browser fallback (headless testing only): direct fetch POST
- *     with a UUID kept in localStorage. On a real device the plugin
- *     always exists, so the fallback never runs there.
+/* MS Study — app shell (Capacitor 6, single-page app). NO-PASSWORD
+ * build (v1.0.23): there is no login, no lock screen, no password
+ * anywhere. The device id IS the identity — a UUID generated once
+ * (native MsAccess plugin, AES-encrypted store; localStorage
+ * `ms_device_id` fallback in a plain browser) and sent as {deviceId}
+ * on every server call. The server accepts deviceId-only.
+ * The hidden chat (3s logo long-press + chat code in the native
+ * store) is separate from login and is untouched.
  *
  * SECURITY RULES (do not weaken):
- *   - The entered password lives in MEMORY (MsStudySession.password, a JS
- *     variable) AND encrypted natively (MsSessionStore, AES-256/GCM key
- *     in the Android Keystore) since v1.0.3, so a fresh launch — including
- *     after an app update — silently revalidates and skips the lock
- *     screen. It is NEVER written to localStorage, sessionStorage, or
- *     any file in plain text. The stored password is cleared on logout,
- *     kick, or "incorrect".
- *   - Within one run, revalidation uses the in-memory password every
- *     15s + on resume.
  *   - NO download option for any content anywhere in the UI.
  *   - NO Google Sign-In / Drive key in the client (see drive.js).
  */
@@ -31,16 +17,14 @@
 /* ================= Config ================= */
 var SERVER_URL = 'https://byulsopangzovpwywgzf.supabase.co/functions/v1/ms-api';
 var UPDATE_URL = 'https://mohitsaini921837-bot.github.io/ms-study-app/update/version.json';
-var CURRENT_VERSION_CODE = 23;
+var CURRENT_VERSION_CODE = 24;
 
 /* Exposed read-only for drive.js (it reads SERVER_URL from here). */
 window.MsStudyConfig = { SERVER_URL: SERVER_URL, UPDATE_URL: UPDATE_URL, CURRENT_VERSION_CODE: CURRENT_VERSION_CODE };
 
 /* In-memory session ONLY. Never persisted. */
-window.MsStudySession = { password: '', deviceId: '', deviceLabel: 'MS Study App', role: '' };
+window.MsStudySession = { deviceId: '', deviceLabel: 'MS Study App' };
 
-var authed = false;
-var revalTimer = null;
 var pendingUpdate = null;
 
 /* ================= Small helpers ================= */
@@ -101,8 +85,8 @@ async function getDeviceInfo() {
 }
 
 /* ================= Screens / router ================= */
-var MAIN_SCREENS = ['screen-notes', 'screen-tests', 'screen-practice', 'screen-admin'];
-var ALL_SCREENS = MAIN_SCREENS.concat(['screen-lock', 'screen-chat-lock', 'screen-chat', 'screen-take', 'screen-test-subjects', 'screen-test-chapters', 'screen-test-list', 'screen-practice-subjects', 'screen-practice-chapters', 'screen-practice-list']);
+var MAIN_SCREENS = ['screen-notes', 'screen-tests', 'screen-practice'];
+var ALL_SCREENS = MAIN_SCREENS.concat(['screen-chat-lock', 'screen-chat', 'screen-take', 'screen-test-subjects', 'screen-test-chapters', 'screen-test-list', 'screen-practice-subjects', 'screen-practice-chapters', 'screen-practice-list']);
 
 var currentScreenId = 'screen-notes'; // FIX 10 (v1.0.12): tracked for live refresh
 
@@ -124,12 +108,10 @@ function showScreen(id) {
   if (id === 'screen-notes') { notesBrowser.load(); }
   else if (id === 'screen-practice') { practiceBrowser.load(); refreshPracticeSets(); }
   else if (id === 'screen-tests') { refreshTestsScreen(); }
-  else if (id === 'screen-admin') { refreshAdminPasswords(); }
 }
 
 document.querySelectorAll('.nav-btn').forEach(function (btn) {
   btn.addEventListener('click', function () {
-    if (!authed) { return; }
     // FIX 12: a lateral tab switch clears the back stack — the user is
     // starting a fresh top-level context, not going deeper.
     clearBackStack();
@@ -144,8 +126,7 @@ document.querySelectorAll('.nav-btn').forEach(function (btn) {
  * upload / delete / generate / submit handler already re-loads its list).
  * The poll is SILENT (no spinners, no toasts, no scroll reset, open
  * sections stay open) and only polls the currently visible screen, only
- * while the app is open (never on the lock screen). The admin screen is
- * refreshed on entry and after create/delete — it needs no poll.
+ * while the app is open (never on the lock screen).
  * POLL INTERVAL (user order 2026-11-24 20:24 IST): 0.5 seconds (500ms),
  * chained with setTimeout AFTER each fetch completes (never overlapping).
  * If a poll fails, it backs off silently to 5s and returns to 0.5s on the
@@ -177,7 +158,6 @@ function scheduleLivePoll(delay) {
 
 async function runLivePoll() {
   livePollTimer = null;
-  if (!authed) { return; }
   try {
     await refreshCurrentScreen(true);
     livePollDelay = 500; // success: back to 0.5s
@@ -199,7 +179,7 @@ function stopLivePoll() {
 
 /* Refresh the current screen when the app comes back to the foreground. */
 document.addEventListener('visibilitychange', function () {
-  if (!document.hidden && authed) {
+  if (!document.hidden) {
     refreshCurrentScreen(true).catch(function () { /* silent */ });
   }
 });
@@ -207,7 +187,7 @@ document.addEventListener('visibilitychange', function () {
 /* ================= Android back button (FIX 12, v1.0.12) =================
  * The phone's back button goes back ONE step at a time, never closing
  * everything at once. A simple back stack records each deeper step
- * (viewer, palette, choice dialog, chat menu, take test, admin, chat);
+ * (viewer, palette, choice dialog, chat menu, take test, chat);
  * one press pops one entry and undoes it. Folder/section navigation is
  * hierarchical with breadcrumb jumps, so it is handled from the live state
  * (collapse an open section, then go up one folder level) instead of a
@@ -216,7 +196,7 @@ document.addEventListener('visibilitychange', function () {
  * the required priority order:
  *   1. overlay open (viewer / palette / dialog / menu) -> close only it
  *   2. section open or inside a folder -> back one level
- *   3. sub-screen (take / admin / chat) -> back to the main screen
+ *   3. sub-screen (take / chat) -> back to the main screen
  *   4. main tab at the top level, nothing open -> exit the app
  * The in-app upper-corner back buttons call the same goBackOneStep(), so
  * both back paths always agree. */
@@ -242,15 +222,12 @@ function goBackOneStep() {
 }
 
 function goBackByState() {
-  // Not signed in (lock screen): there is nowhere to go back to.
-  if (!authed) { exitApp(); return; }
   // 1. Any overlay still open? Close only it.
   if ($('screen-viewer') && !$('screen-viewer').hidden) { closeViewer(); return; }
   if ($('takePalette') && !$('takePalette').hidden) { closeTakePalette(); return; }
   if ($('chatMsgMenu') && !$('chatMsgMenu').hidden) { closeChatMsgMenu(); return; }
   // 2. A sub-screen? Back to the main screen it came from.
   if (currentScreenId === 'screen-take') { exitTakeScreen(); return; }
-  if (currentScreenId === 'screen-admin') { showScreen('screen-notes'); return; }
   // v1.0.18: test navigation sub-pages — back to the parent page.
   if (currentScreenId === 'screen-test-subjects') { showScreen('screen-tests'); return; }
   if (currentScreenId === 'screen-test-chapters') { showScreen('screen-tests'); return; }
@@ -329,194 +306,36 @@ function exitApp() {
   if (!AppPlugin || !AppPlugin.addListener) { return; }
   AppPlugin.addListener('backButton', function () { goBackOneStep(); });
   AppPlugin.addListener('appStateChange', function (state) {
-    if (state && state.isActive && authed) {
+    if (state && state.isActive) {
       refreshCurrentScreen(true).catch(function () { /* silent */ });
     }
   });
 })();
 
-/* ================= Password gate ================= */
-var GATE_MSGS = {
-  incorrect: ['Incorrect password', 'Check and try again.'],
-  kicked: ['Signed in on another device', 'Sign in again to continue.'],
-  unavailable: ['Unable to connect', 'Check your connection and try again.'],
-  rate_limited: ['Please wait', 'Try again shortly.'],
-  empty: ['Enter your password', '']
-};
-
-function showLockError(key) {
-  var err = $('lockError');
-  if (key && GATE_MSGS[key]) {
-    $('lockErrorTitle').textContent = GATE_MSGS[key][0];
-    $('lockErrorText').textContent = GATE_MSGS[key][1];
-    err.hidden = false;
-  } else {
-    err.hidden = true;
-  }
-}
-
-function showLockChecking(on) {
-  $('lockCard').hidden = on;
-  $('lockChecking').hidden = !on;
-  $('lockBtn').disabled = on;
-}
-
-/* One validate call. Prefers the native plugin (mirrors PW); falls back
- * to a direct fetch POST in a plain browser. Returns the server result:
- * {result: "valid"|"incorrect"|"kicked"|"unavailable"|"rate_limited", role?}
- * mode: "login" (explicit password entry, may rebind — last login wins)
- * or "revalidate" (background check, never rebinds). */
-async function validatePassword(password, mode) {
-  var m = (mode === 'revalidate') ? 'revalidate' : 'login';
-  var info = await getDeviceInfo();
-  window.MsStudySession.deviceId = info.deviceId;
-  window.MsStudySession.deviceLabel = info.deviceLabel;
-
-  var plugin = capPlugin('MsAccess');
-  if (plugin && plugin.validate) {
-    var r = await plugin.validate({ password: password, mode: m });
-    return r || { result: 'unavailable' };
-  }
-  var res = await fetch(SERVER_URL + '/validate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify({ password: password, deviceId: info.deviceId, deviceLabel: info.deviceLabel, mode: m })
-  });
-  if (res.status === 429) { return { result: 'rate_limited' }; }
-  var data = await res.json().catch(function () { return {}; });
-  return data || { result: 'unavailable' };
-}
-
-async function submitLogin() {
-  var pw = ($('lockPassword').value || '').trim();
-  if (!pw) { showLockError('empty'); return; }
-  showLockError(null);
-  showLockChecking(true);
-  try {
-    var r = await validatePassword(pw);
-    if (r.result === 'valid') {
-      // Password -> memory, and encrypted natively (plugin saves it),
-      // so the next launch stays signed in, even after an update.
-      window.MsStudySession.password = pw;
-      window.MsStudySession.role = r.role || 'user';
-      enterApp();
-    } else if (r.result === 'kicked') {
-      showLockChecking(false);
-      showToast('Signed in on another device.');
-      showLockError('kicked');
-    } else if (r.result && GATE_MSGS[r.result]) {
-      showLockChecking(false);
-      showLockError(r.result);
-    } else {
-      showLockChecking(false);
-      showLockError('unavailable');
-    }
-  } catch (e) {
-    showLockChecking(false);
-    showLockError('unavailable');
-  }
-}
-
+/* ================= No-password entry (v1.0.23) =================
+ * No login screen, no password, no revalidation: the app opens
+ * straight to Notes and the device id (see getDeviceInfo) is the
+ * only identity, sent as {deviceId} on every server call. */
 function enterApp() {
-  authed = true;
-  showLockChecking(false);
-  $('lockPassword').value = '';
   $('activeChip').hidden = false;
-  $('adminBtn').hidden = (window.MsStudySession.role !== 'admin');
   showScreen('screen-notes');
   loadCompletions(); // v1.0.14: green ticks for Mark as Complete
-  startRevalidation();
   startLivePoll();
   checkForUpdate();
 }
 
-function lockout(reason) {
-  authed = false;
-  window.MsStudySession.password = '';
-  window.MsStudySession.role = '';
-  stopRevalidation();
-  stopLivePoll();
-  stopChat();
-  $('activeChip').hidden = true;
-  $('adminBtn').hidden = true;
-  var plugin = capPlugin('MsAccess');
-  if (plugin && plugin.clearSession) { try { plugin.clearSession(); } catch (e) {} }
-  showScreen('screen-lock');
-  showLockChecking(false);
-  if (reason === 'kicked') {
-    showToast('Signed in on another device.');
-    showLockError('kicked');
-  } else if (reason === 'incorrect') {
-    showLockError('incorrect');
-  } else {
-    showLockError(null);
-  }
-}
-/* drive.js calls this on an auth failure from a Drive request. */
-window.MsStudyLockout = lockout;
-
-/* Silent revalidation every 15s + on resume, with the in-memory password.
- * "kicked"/"incorrect" locks immediately; "unavailable"/"rate_limited"
- * keep the session and retry on the next cycle (mirrors PW). */
-async function revalidateSilent() {
-  if (!authed || !window.MsStudySession.password) { return; }
-  try {
-    var r;
-    var plugin = capPlugin('MsAccess');
-    if (plugin && plugin.revalidate) {
-      // Native silent check (silent=true): "unavailable" keeps the
-      // session, only a definite rejection clears it (mirrors PW).
-      r = await plugin.revalidate({ password: window.MsStudySession.password, silent: true });
-    } else {
-      r = await validatePassword(window.MsStudySession.password, 'revalidate');
-    }
-    if (r.result === 'kicked') { lockout('kicked'); }
-    else if (r.result === 'incorrect') { lockout('incorrect'); }
-    else if (r.result === 'valid' && r.role) { window.MsStudySession.role = r.role; }
-    /* unavailable / rate_limited / no_session: keep current state, retry later. */
-  } catch (e) { /* transient: keep session, retry on next cycle */ }
-}
-
-function startRevalidation() {
-  stopRevalidation();
-  revalTimer = setInterval(revalidateSilent, 15000);
-}
-
-function stopRevalidation() {
-  if (revalTimer) { clearInterval(revalTimer); revalTimer = null; }
-}
-
-$('lockBtn').addEventListener('click', submitLogin);
-$('lockPassword').addEventListener('keydown', function (ev) {
-  if (ev.key === 'Enter') { submitLogin(); }
-});
-$('lockPassword').addEventListener('focus', function () { showLockError(null); });
-
-document.addEventListener('visibilitychange', function () {
-  if (!document.hidden && authed) { revalidateSilent(); }
-});
-(function watchResume() {
-  var app = capPlugin('App');
-  if (app && app.addListener) {
-    app.addListener('resume', function () { if (authed) { revalidateSilent(); } });
-  }
-})();
-
 /* ================= API helper ================= */
-/* POST JSON to the server with the in-memory session. On an auth
- * failure the user goes back to the lock screen (lockout). Other
- * failures surface as one short line: "Not allowed." / "Try again." */
+/* POST JSON to the server with {deviceId} only (v1.0.23: no password).
+ * Failures surface as one short line: "Not allowed." / "Try again." */
 async function apiCall(path, extra) {
-  // Device id must always be set before any server call. The saved-login
-  // path (trySavedLogin) used to skip it, so the first calls after an
-  // auto-login sent an empty deviceId and the server answered
-  // "incorrect" — folders/sections looked unmade and invisible.
+  // Device id must always be set before any server call — an empty
+  // deviceId used to make folders/sections look unmade and invisible.
   if (!window.MsStudySession.deviceId) {
     var dinfo = await getDeviceInfo();
     window.MsStudySession.deviceId = dinfo.deviceId;
     window.MsStudySession.deviceLabel = dinfo.deviceLabel;
   }
-  var body = { password: window.MsStudySession.password, deviceId: window.MsStudySession.deviceId };
+  var body = { deviceId: window.MsStudySession.deviceId };
   Object.keys(extra || {}).forEach(function (k) { body[k] = extra[k]; });
   var res = await fetch(SERVER_URL + path, {
     method: 'POST',
@@ -524,8 +343,7 @@ async function apiCall(path, extra) {
     body: JSON.stringify(body)
   });
   var data = await res.json().catch(function () { return {}; });
-  if (data && data.result === 'incorrect') { lockout('incorrect'); throw new Error('Try again.'); }
-  if (data && data.result === 'kicked') { lockout('kicked'); throw new Error('Try again.'); }
+  if (data && (data.result === 'incorrect' || data.result === 'kicked')) { throw new Error('Try again.'); }
   if (data && data.result === 'unauthorized') { throw new Error('Not allowed.'); }
   if (data && data.result === 'unavailable') { throw new Error('Try again.'); }
   if (!res.ok) { throw new Error('Try again.'); }
@@ -533,11 +351,12 @@ async function apiCall(path, extra) {
 }
 
 /* ================= Mark as Complete (v1.0.14) ================= */
-/* Every folder / section / note / practice sheet has a 3-dot menu with
- * "Mark as complete" — a green tick shows on the row. The completion is
- * stored on the server keyed by the PASSWORD (hash), NOT the device, so
- * the tick survives logout/login AND logging in on another phone with
- * the same password. */
+/* Every folder / section / note / practice sheet — and every test and
+ * practice-set card — has a 3-dot menu with "Mark as complete": a
+ * green-circled tick shows on the row/card. The completion is stored
+ * on the server keyed by device_id (ms_completions), so the tick
+ * follows this device. Test cards use item_type "test", practice
+ * cards use item_type "practice", so the two never collide. */
 var completions = {}; // "type:id" -> true
 
 async function loadCompletions() {
@@ -588,8 +407,8 @@ function closeRowMenu() {
 /* Each browser keeps its own folder + path. Folders open on tap
  * (breadcrumb to go back), sections expand to show their items,
  * items open their Drive link on tap.
- * Admin only, inside a folder: "New folder" / "New section" create row.
- * Admin only, inside an open section: Note / Practice sheet upload
+ * Inside a folder: "New folder" / "New section" create row.
+ * Inside an open section: Note / Practice sheet upload
  * cards — both kinds, on every browser screen. */
 function createBrowser(opts) {
   var state = { folderId: null, path: [], foldersById: {}, expanded: {} };
@@ -604,12 +423,11 @@ function createBrowser(opts) {
     c.innerHTML = html;
   }
 
-  /* Admin-only create row, inside the CURRENT folder ("All" = top level).
+  /* Create row, inside the CURRENT folder ("All" = top level).
    * New folder works at any level; New section needs a folder open. */
   function renderCreate() {
     var box = $(opts.create);
     if (!box) { return; }
-    if (window.MsStudySession.role !== 'admin') { box.hidden = true; box.innerHTML = ''; return; }
     box.hidden = false;
     var html = '<div class="row-form"><input class="field-input" data-new-folder type="text" placeholder="Folder name" autocomplete="off" />' +
       '<button class="btn-secondary" data-add-folder type="button">Add folder</button></div>' +
@@ -674,10 +492,9 @@ function createBrowser(opts) {
     }
   }
 
-  /* Upload cards inside an open section — all three kinds, every screen,
-   * admin only. data-section carries the section id for the upload. */
+  /* Upload cards inside an open section — all three kinds, every screen.
+   * data-section carries the section id for the upload. */
   function uploadCardsHtml(sectionId) {
-    if (window.MsStudySession.role !== 'admin') { return ''; }
     var kinds = [['note', 'Note'], ['sheet', 'Practice sheet']];
     var html = '<div class="section-uploads">';
     kinds.forEach(function (k) {
@@ -704,7 +521,8 @@ function createBrowser(opts) {
       items.forEach(function (it) {
         // FIX 7 (v1.0.12): items open in the in-app viewer — never Drive.
         html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-item="1" data-item-id="' + esc(it.id || '') + '" data-item-kind="' + esc(it.kind || '') + '" data-item-title="' + esc(it.title || '') + '" data-item-file="' + esc(it.drive_file_id || '') + '">' +
-          (isComplete('item', it.id) ? '<span class="complete-tick">✓</span> ' : '') + esc(it.title || '') + '</button>' +
+          esc(it.title || '') + '</button>' +
+          (isComplete('item', it.id) ? '<span class="complete-tick">✓</span>' : '') +
           '<button type="button" class="row-dot" data-dot-type="item" data-dot-id="' + esc(it.id || '') + '" aria-label="Options">⋮</button></div>';
       });
       html += uploadCardsHtml(sectionId);
@@ -749,12 +567,11 @@ function createBrowser(opts) {
     }
   }
 
-  /* Admin-only delete: confirm first; the folder delete also removes
+  /* Delete: confirm first; the folder delete also removes
    * its subfolders, sections and items server-side. If the deleted folder
    * is the one (or an ancestor of the one) currently open, go back to
    * the top level instead of showing a dead breadcrumb. */
   async function deleteFolder(folderId) {
-    if (window.MsStudySession.role !== 'admin') { return; }
     if (!window.confirm('Delete this folder and everything inside it?')) { return; }
     try {
       await apiCall('/folders/delete', { folderId: folderId });
@@ -768,7 +585,6 @@ function createBrowser(opts) {
   }
 
   async function deleteSection(sectionId) {
-    if (window.MsStudySession.role !== 'admin') { return; }
     if (!window.confirm('Delete this section and its items?')) { return; }
     try {
       await apiCall('/sections/delete', { sectionId: sectionId });
@@ -858,11 +674,11 @@ function createBrowser(opts) {
       state.foldersById = {};
       folders.forEach(function (f) { state.foldersById[f.id] = f.name; });
       var html = '';
-      var isAdmin = window.MsStudySession.role === 'admin';
       folders.forEach(function (f) {
-        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-folder="' + esc(f.id) + '">' + (isComplete('folder', f.id) ? '<span class="complete-tick">✓</span> ' : '') + '📁 ' + esc(f.name) + '</button>' +
+        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-folder="' + esc(f.id) + '">' + '📁 ' + esc(f.name) + '</button>' +
+          (isComplete('folder', f.id) ? '<span class="complete-tick">✓</span>' : '') +
           '<button type="button" class="row-dot" data-dot-type="folder" data-dot-id="' + esc(f.id) + '" aria-label="Options">⋮</button>' +
-          (isAdmin ? '<button type="button" class="row-del" data-del-folder="' + esc(f.id) + '" aria-label="Delete folder">×</button>' : '') + '</div>';
+          '<button type="button" class="row-del" data-del-folder="' + esc(f.id) + '" aria-label="Delete folder">×</button></div>';
       });
       sections.forEach(function (s) {
         // FIX 8 (v1.0.12): a section with EXACTLY ONE item opens that item
@@ -874,15 +690,17 @@ function createBrowser(opts) {
         if (single) {
           openAttrs = ' data-open-item="1" data-item-kind="' + esc(single.kind || '') + '" data-item-title="' + esc(single.title || '') + '" data-item-file="' + esc(single.drive_file_id || '') + '"';
         }
-        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-section="' + esc(s.id) + '"' + openAttrs + '>' + (isComplete('section', s.id) ? '<span class="complete-tick">✓</span> ' : '') + '▸ ' + esc(s.name) + '</button>' +
+        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-section="' + esc(s.id) + '"' + openAttrs + '>' + '▸ ' + esc(s.name) + '</button>' +
+          (isComplete('section', s.id) ? '<span class="complete-tick">✓</span>' : '') +
           '<button type="button" class="row-dot" data-dot-type="section" data-dot-id="' + esc(s.id) + '" aria-label="Options">⋮</button>' +
-          (isAdmin ? '<button type="button" class="row-del" data-del-section="' + esc(s.id) + '" aria-label="Delete section">×</button>' : '') + '</div>';
+          '<button type="button" class="row-del" data-del-section="' + esc(s.id) + '" aria-label="Delete section">×</button></div>';
         html += '<div class="section-items" id="' + opts.list + '-sec-' + esc(s.id) + '" hidden></div>';
       });
       items.forEach(function (it) {
         // FIX 7 (v1.0.12): items open in the in-app viewer — never Drive.
         html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-item="1" data-item-id="' + esc(it.id || '') + '" data-item-kind="' + esc(it.kind || '') + '" data-item-title="' + esc(it.title || '') + '" data-item-file="' + esc(it.drive_file_id || '') + '">' +
-          (isComplete('item', it.id) ? '<span class="complete-tick">✓</span> ' : '') + esc(it.title || '') + '</button>' +
+          esc(it.title || '') + '</button>' +
+          (isComplete('item', it.id) ? '<span class="complete-tick">✓</span>' : '') +
           '<button type="button" class="row-dot" data-dot-type="item" data-dot-id="' + esc(it.id || '') + '" aria-label="Options">⋮</button></div>';
       });
       if (!html) { html = '<p class="muted">Empty.</p>'; }
@@ -1046,7 +864,7 @@ async function openViewer(item) {
     var res = await fetch(SERVER_URL + '/drive/file', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: window.MsStudySession.password, deviceId: window.MsStudySession.deviceId, fileId: fileId })
+      body: JSON.stringify({ deviceId: window.MsStudySession.deviceId, fileId: fileId })
     });
     if (!res.ok) { viewerShowError(); return; }
     var contentType = (res.headers.get('Content-Type') || '').toLowerCase();
@@ -1232,7 +1050,13 @@ function renderTestChapters(subject) {
     : '<p class="muted">No chapters.</p>';
 }
 
-function testCardHtml(t) {
+/* v1.0.23: every test / practice card has a 3-dot menu (Mark as
+ * complete) and, when complete, a green-circled tick on the RIGHT,
+ * next to the 3-dot button. completeType is "test" for test cards
+ * and "practice" for practice cards (distinct item_type values, so
+ * a test and a practice set never share a completion row). */
+function testCardHtml(t, completeType) {
+  var kind = completeType || 'test';
   var lang = (t.language === 'hi') ? 'Hindi' : (t.language === 'en') ? 'English' : (t.language || '');
   // v1.0.20: practice sets have duration_min 0 (no timer) — never show "0 min".
   var parts = [];
@@ -1241,7 +1065,11 @@ function testCardHtml(t) {
   if (lang) { parts.push(lang); }
   var meta = parts.join(' · ');
   return '<div class="test-card" data-test="' + esc(t.id) + '">' +
-    '<span class="test-card-title">' + esc(t.title || 'Test') + '</span>' +
+    '<div class="test-card-head"><span class="test-card-title">' + esc(t.title || 'Test') + '</span>' +
+    '<span class="test-card-side">' +
+    (isComplete(kind, t.id) ? '<span class="complete-tick">✓</span>' : '') +
+    '<button type="button" class="row-dot test-card-dot" data-dot-type="' + kind + '" data-dot-id="' + esc(t.id) + '" aria-label="Options">⋮</button>' +
+    '</span></div>' +
     '<span class="test-card-meta">' + esc(meta) + '</span>' +
     '<div class="test-card-actions" data-actions-for="' + esc(t.id) + '">' +
     '<button type="button" class="btn-primary btn-glass-color test-act-btn" data-act="attempt" data-test="' + esc(t.id) + '">Attempt</button>' +
@@ -1259,14 +1087,15 @@ function testCardActionsHtml(testId, hasAttempt) {
 /* v1.0.20: parameterised so the practice list reuses the same cards
  * (Attempt / Result + Re-attempt come free). ids defaults to the test
  * list elements; practice passes its own. */
-function renderTestList(tests, title, ids) {
+function renderTestList(tests, title, ids, completeType) {
   ids = ids || { title: 'testListTitle', list: 'testList', detail: 'testListDetail' };
   $(ids.title).textContent = title;
   var listEl = $(ids.list);
   var detailEl = $(ids.detail);
   if (detailEl) { detailEl.textContent = ''; }
   if (!tests.length) { listEl.innerHTML = '<p class="muted">No tests.</p>'; return; }
-  listEl.innerHTML = tests.map(testCardHtml).join('');
+  var kind = completeType || 'test';
+  listEl.innerHTML = tests.map(function (t) { return testCardHtml(t, kind); }).join('');
   // For each test, check THIS user's latest attempt and swap the card's
   // buttons: Attempt only when never taken; Result + Re-attempt when taken.
   tests.forEach(function (t) {
@@ -1374,6 +1203,8 @@ $('testChapterList').addEventListener('click', function (ev) {
 });
 
 $('testList').addEventListener('click', function (ev) {
+  var dot = ev.target.closest('[data-dot-type]');
+  if (dot) { openRowMenu(dot.getAttribute('data-dot-type'), dot.getAttribute('data-dot-id'), dot); return; }
   var b = ev.target.closest('[data-act]');
   if (!b) { return; }
   var testId = b.getAttribute('data-test');
@@ -1489,7 +1320,7 @@ function renderPracticeChapters(subject) {
  * that hidden element, so the set cards were drawn off-screen and the
  * chapter page looked empty. */
 function renderPracticeList(tests, title) {
-  renderTestList(tests, title, { title: 'practiceListTitle', list: 'practiceSetsList', detail: 'practiceSetsDetail' });
+  renderTestList(tests, title, { title: 'practiceListTitle', list: 'practiceSetsList', detail: 'practiceSetsDetail' }, 'practice');
 }
 
 function rerenderPracticeSubPage() {
@@ -1561,6 +1392,8 @@ $('practiceChapterList').addEventListener('click', function (ev) {
 });
 
 $('practiceSetsList').addEventListener('click', function (ev) {
+  var dot = ev.target.closest('[data-dot-type]');
+  if (dot) { openRowMenu(dot.getAttribute('data-dot-type'), dot.getAttribute('data-dot-id'), dot); return; }
   var b = ev.target.closest('[data-act]');
   if (!b) { return; }
   var testId = b.getAttribute('data-test');
@@ -1809,8 +1642,8 @@ function sleep(ms) {
 
 async function submitTakeResult(score, total, detail) {
   // POST /tests/submit with up to 3 attempts (~800ms between them).
-  // Body is exactly what handleTestsSubmit expects: password + deviceId
-  // (from the live session) plus testId/score/total/answers and the full
+  // Body is exactly what handleTestsSubmit expects: deviceId (only)
+  // plus testId/score/total/answers and the full
   // result detail (time taken, correct, wrong, unattempted).
   // Never blocks the result screen: the score and review are already
   // shown before this is called; only the status line changes.
@@ -1836,7 +1669,7 @@ async function submitTakeResult(score, total, detail) {
         window.MsStudySession.deviceId = dinfo.deviceId;
         window.MsStudySession.deviceLabel = dinfo.deviceLabel;
       }
-      var body = { password: window.MsStudySession.password, deviceId: window.MsStudySession.deviceId };
+      var body = { deviceId: window.MsStudySession.deviceId };
       Object.keys(payload).forEach(function (k) { body[k] = payload[k]; });
       var res = await fetch(SERVER_URL + '/tests/submit', {
         method: 'POST',
@@ -2195,147 +2028,9 @@ $('takeReviewFilters').addEventListener('click', function (ev) {
   showTakeReview(b.getAttribute('data-review-filter'));
 });
 
-/* ================= Admin ================= */
-function adminHeaders() {
-  return { 'Content-Type': 'application/json', 'Accept': 'application/json' };
-}
-
-function adminBody(extra) {
-  var body = {
-    adminPassword: window.MsStudySession.password,
-    deviceId: window.MsStudySession.deviceId
-  };
-  Object.keys(extra || {}).forEach(function (k) { body[k] = extra[k]; });
-  return body;
-}
-
-async function adminPost(path, extra) {
-  var res = await fetch(SERVER_URL + path, {
-    method: 'POST',
-    headers: adminHeaders(),
-    body: JSON.stringify(adminBody(extra))
-  });
-  var data = await res.json().catch(function () { return {}; });
-  if (data && (data.result === 'incorrect' || data.result === 'kicked')) {
-    lockout(data.result);
-    throw new Error('Try again.');
-  }
-  if (data && data.result === 'unauthorized') { throw new Error('Not allowed.'); }
-  if (data && data.result === 'unavailable') { throw new Error('Try again.'); }
-  if (!res.ok) { throw new Error((data && (data.error || data.message)) || 'Try again.'); }
-  return data;
-}
-
-$('adminBtn').addEventListener('click', function () {
-  if (window.MsStudySession.role !== 'admin') { return; }
-  showScreen('screen-admin');
-  pushBack({ kind: 'admin', undo: function () { showScreen('screen-notes'); } });
-});
-$('adminBackBtn').addEventListener('click', function () { goBackOneStep(); });
-
-$('adminCreateBtn').addEventListener('click', async function () {
-  var btn = $('adminCreateBtn');
-  btn.disabled = true;
-  try {
-    // FIX 9 (v1.0.12): a typed custom password is sent as-is; empty = random.
-    var custom = ($('adminCustomPw').value || '').trim();
-    var data = await adminPost('/admin/create-password', custom ? { password: custom } : {});
-    var code = data.code || data.password || '';
-    if (!code) { throw new Error('Try again.'); }
-    $('adminNewCodeText').textContent = code;
-    $('adminCreateResult').hidden = false;
-    $('adminCustomPw').value = '';
-    showToast('Password created.');
-    refreshAdminPasswords(); // FIX 9: the new row appears at once.
-  } catch (e) {
-    showToast('Could not create password.');
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-$('adminCopyBtn').addEventListener('click', async function () {
-  try {
-    await navigator.clipboard.writeText($('adminNewCodeText').textContent);
-    showToast('Copied.');
-  } catch (e) { showToast('Could not copy.'); }
-});
-
-/* FIX 9 (v1.0.12): the password-list refresh, shared by the Refresh
- * button and by the auto-refresh after a create/delete/deactivate. */
-async function refreshAdminPasswords() {
-  var btn = $('adminRefreshBtn');
-  if (btn) { btn.disabled = true; }
-  try {
-    var data = await adminPost('/admin/passwords', {});
-    var rows = data.passwords || data.items || data || [];
-    if (!Array.isArray(rows) || rows.length === 0) {
-      $('adminPasswordsBody').innerHTML = '<tr><td colspan="6" class="muted">No passwords.</td></tr>';
-      return;
-    }
-    // Batched render: one innerHTML write for the whole table.
-    var html = '';
-    rows.forEach(function (row) {
-      var id = row.id || row.passwordId || '';
-      var active = (row.active !== false);
-      // FIX 9: the server returns snake_case — read those fields first so
-      // Device / Label / Last used show real values instead of "—".
-      var device = row.device_id || row.deviceId || row.device || '—';
-      var label = row.device_label || row.deviceLabel || row.label || '—';
-      var lastUsed = row.last_used_at || row.lastUsed || row.last_used || '—';
-      html += '<tr><td>' + esc(row.role || 'user') + '</td><td>' + esc(device) +
-        '</td><td>' + esc(label) + '</td><td>' + esc(lastUsed) +
-        '</td><td>' + (active ? '✅' : '❌') + '</td><td>' +
-        (active ? '<button class="row-btn" type="button" data-deactivate="' + esc(id) + '">Deactivate</button>' : '') +
-        ' <button class="row-btn" type="button" data-delete-pw="' + esc(id) + '">Delete</button>' +
-        '</td></tr>';
-    });
-    $('adminPasswordsBody').innerHTML = html;
-  } catch (e) {
-    showToast('Could not load the list.');
-  } finally {
-    if (btn) { btn.disabled = false; }
-  }
-}
-
-$('adminRefreshBtn').addEventListener('click', refreshAdminPasswords);
-
-/* Deactivate + Delete buttons are rendered in a batch, so one delegated
- * listener. FIX 9 (v1.0.12): Delete is a real delete — the user is signed
- * out on their next revalidation. */
-$('adminPasswordsBody').addEventListener('click', async function (ev) {
-  var del = ev.target.closest('[data-delete-pw]');
-  if (del) {
-    var delId = del.getAttribute('data-delete-pw');
-    if (!window.confirm('Delete this password? The user will be signed out.')) { return; }
-    del.disabled = true;
-    try {
-      await adminPost('/admin/delete-password', { id: delId });
-      showToast('Password deleted.');
-      refreshAdminPasswords();
-    } catch (e) {
-      showToast('Could not delete.');
-      del.disabled = false;
-    }
-    return;
-  }
-  var btn = ev.target.closest('[data-deactivate]');
-  if (!btn) { return; }
-  var id = btn.getAttribute('data-deactivate');
-  btn.disabled = true;
-  try {
-    await adminPost('/admin/deactivate', { id: id });
-    showToast('Password deactivated.');
-    refreshAdminPasswords();
-  } catch (e) {
-    showToast('Could not deactivate.');
-    btn.disabled = false;
-  }
-});
-
 /* ================= Hidden chat entry + real chat ================= */
 /* The chat code is the pairing key, so it must survive app updates.
- * It lives in the native encrypted store (like the password), NOT in
+ * It lives in the native encrypted store, NOT in
  * WebView localStorage. localStorage is kept only as a fallback, and a
  * code found there is migrated to the native store on first read. */
 var CHAT_CODE_KEY = 'ms_chat_code';
@@ -2397,7 +2092,7 @@ function armLongPress() {
   cancelLongPress();
   longPressTimer = setTimeout(function () {
     longPressTimer = null;
-    if (authed) { openChatLock(); }
+    openChatLock();
   }, LONG_PRESS_MS);
 }
 
@@ -2503,7 +2198,7 @@ function pushPlugin() { return capPlugin('PushNotifications'); }
 /* Re-send the current token to the server for the open room (if any).
  * Called when a token arrives/refreshes and after joining a chat. */
 async function sendPushTokenToServer() {
-  if (!pushState.token || !chatState.code || !authed) { return; }
+  if (!pushState.token || !chatState.code) { return; }
   try {
     await apiCall('/chat/push-token', { code: chatState.code, pushToken: pushState.token });
   } catch (e) { /* silent: re-sent on the next join / token refresh */ }
@@ -2546,7 +2241,7 @@ async function initPushNotifications() {
       plugin.addListener('pushNotificationActionPerformed', function () {
         /* Tapping the notification opens the app; if signed in, go
          * straight to the chat lock screen. */
-        if (authed) { openChatLock(); }
+        openChatLock();
       });
     } catch (e) { /* listeners unavailable: polling still works */ }
     /* A token from an earlier run: the 'registration' event may not
@@ -3089,42 +2784,17 @@ $('updateBtn').addEventListener('click', async function () {
   }
 });
 
-/* ================= Boot ================= */
-/* Stay signed in across launches and updates: the password is stored
- * AES-encrypted natively (like PW), so boot silently revalidates it.
- * Only if there is no stored password (or it was kicked/incorrect)
- * does the lock screen show. */
-async function trySavedLogin() {
-  var plugin = capPlugin('MsAccess');
-  if (plugin && plugin.revalidateSaved) {
-    try {
-      var r = await plugin.revalidateSaved();
-      if (r && r.result === 'valid' && r.password) {
-        window.MsStudySession.password = r.password;
-        window.MsStudySession.role = r.role || 'user';
-        // Populate the device id now, not 15s later at the first
-        // revalidation — every server call needs it (see apiCall).
-        var dinfo = await getDeviceInfo();
-        window.MsStudySession.deviceId = dinfo.deviceId;
-        window.MsStudySession.deviceLabel = dinfo.deviceLabel;
-        enterApp();
-        return;
-      }
-    } catch (e) { /* fall through to the lock screen */ }
-  }
-  showScreen('screen-lock');
-}
-trySavedLogin();
+/* ================= Boot (v1.0.23: no password) =================
+ * No saved login to restore — the app opens straight to Notes.
+ * The device id is generated lazily by getDeviceInfo() on the first
+ * server call (see apiCall). */
+enterApp();
 /* Push notifications for the hidden chat (best-effort, silent if
  * unavailable — the chat keeps polling while open either way). */
 initPushNotifications();
-/* Check for an update on launch too (not only after login), so the app
- * can update itself even before signing in. */
-checkForUpdate();
 if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.StatusBar) {
   try {
     window.Capacitor.Plugins.StatusBar.setStyle({ style: 'LIGHT' });
     window.Capacitor.Plugins.StatusBar.setBackgroundColor({ color: '#f4f6f9' });
   } catch (e) { /* non-fatal on web */ }
 }
-
