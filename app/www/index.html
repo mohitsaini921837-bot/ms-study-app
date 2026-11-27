@@ -26,6 +26,16 @@
   <!-- ================= Notes ================= -->
   <section class="screen" id="screen-notes" hidden>
     <div class="section-head"><h2>Notes</h2></div>
+    <!-- APK update banner (v1.0.23): shown automatically when a newer APK
+         versionCode is detected; stays until the update is installed.
+         "Later" on the dialog only hides the dialog, never this banner. -->
+    <div class="card update-banner" id="updateBanner" hidden>
+      <div class="update-banner-text">
+        <strong id="updateBannerTitle">Update available</strong>
+        <span class="muted small" id="updateBannerDetail"></span>
+      </div>
+      <button class="btn-primary btn-glass-color update-banner-btn" id="updateBannerBtn" type="button">Update</button>
+    </div>
     <div class="crumb" id="notesCrumb"></div>
     <div class="browser-create" id="notesCreate" hidden></div>
     <div id="notesList"></div>
@@ -353,6 +363,7 @@
 
 <script src="vendor/pdfjs/pdf.min.js"></script>
 <script src="drive.js"></script>
+<script src="web-update.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

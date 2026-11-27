@@ -2754,7 +2754,34 @@ $('chatChangeCodeBtn').addEventListener('click', async function () {
   openChatLock();
 });
 
-/* ================= In-app update ================= */
+/* ================= In-app update =================
+ * TWO paths, both inside the app (her order 2026-11-27 08:05 IST):
+ *  1. APK (native) update — PROMINENT and automatic: when version.json
+ *     has a newer versionCode, the update dialog opens on launch AND a
+ *     banner card stays pinned at the top of the Notes screen until the
+ *     update is installed. Tapping Update (dialog or banner) downloads
+ *     the APK in-app and opens the Android installer; the one install
+ *     confirmation tap is Android's own requirement and stays.
+ *     "Later" only dismisses the dialog — the banner keeps the button
+ *     visible, so the update is never lost until the next launch.
+ *  2. Web-bundle update — SILENT, no button (see web-update.js): a newer
+ *     wwwBuild in the same manifest is downloaded in the background,
+ *     verified, and applied on the next launch. */
+function showApkUpdateBanner(data) {
+  var banner = $('updateBanner');
+  if (!banner) { return; }
+  $('updateBannerTitle').textContent = 'Update available — v' + (data.version || data.versionCode);
+  $('updateBannerDetail').textContent = 'Tap Update to download and install the new version.';
+  banner.hidden = false;
+}
+
+function openApkUpdateDialog() {
+  if (!pendingUpdate) { return; }
+  $('updateChangelog').textContent = pendingUpdate.changelog || ('Version ' + pendingUpdate.version + ' is available.');
+  $('updateStatus').textContent = '';
+  $('updateDialog').hidden = false;
+}
+
 async function checkForUpdate() {
   try {
     var res = await fetch(UPDATE_URL, { cache: 'no-store' });
@@ -2762,15 +2789,25 @@ async function checkForUpdate() {
     var data = await res.json();
     if (data && data.versionCode > CURRENT_VERSION_CODE) {
       pendingUpdate = data;
-      $('updateChangelog').textContent = data.changelog || ('Version ' + data.version + ' is available.');
-      $('updateDialog').hidden = false;
+      showApkUpdateBanner(data);
+      openApkUpdateDialog();
+    }
+    /* Same manifest, second path: silent web-bundle update. Never
+     * throws, never shows UI, never touches the APK flow above. */
+    if (window.MsWebUpdate && window.MsWebUpdate.checkForWebUpdate) {
+      try { await window.MsWebUpdate.checkForWebUpdate(data); } catch (e) {}
     }
   } catch (e) { /* no update check offline — stay on current version */ }
 }
 
 $('updateLaterBtn').addEventListener('click', function () {
   $('updateDialog').hidden = true;
-  pendingUpdate = null;
+  /* Deliberately KEEP pendingUpdate: the Notes banner stays visible
+   * with its Update button, so the update is one tap away. */
+});
+
+$('updateBannerBtn').addEventListener('click', function () {
+  openApkUpdateDialog();
 });
 
 $('updateBtn').addEventListener('click', async function () {
