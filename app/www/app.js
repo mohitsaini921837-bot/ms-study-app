@@ -123,7 +123,7 @@ document.querySelectorAll('.nav-btn').forEach(function (btn) {
  * Everything updates live — no close/reopen. The current screen re-fetches
  * on every tab switch (see showScreen), on resume (visibilitychange), on a
  * background poll, and immediately after every mutation (each create /
- * upload / delete / generate / submit handler already re-loads its list).
+ * delete / submit handler already re-loads its list).
  * The poll is SILENT (no spinners, no toasts, no scroll reset, open
  * sections stay open) and only polls the currently visible screen, only
  * while the app is open (never on the lock screen).
@@ -377,13 +377,49 @@ async function apiCall(path, extra) {
   return data;
 }
 
+/* ================= No-blink rendering + list cache (v1.0.24) ============ */
+/* User video 2026-11-27 10:23 IST: on a 2-9 KB/s connection every poll
+ * round re-fetched and rebuilt the whole visible list (innerHTML), so
+ * the screen blinked every few seconds and sat on "Loading…" for
+ * minutes (/tests/list alone is ~600 KB). Now:
+ *  (1) a list is re-rendered ONLY when its new HTML actually differs
+ *      from what is on screen (setHtmlIfChanged);
+ *  (2) the last good payload is cached in localStorage and painted
+ *      instantly on launch / tab switch, then refreshed silently;
+ *  (3) "Loading…" only shows when there is nothing cached and nothing
+ *      on screen — never on a poll round, never over cached content. */
+var LIST_CACHE_PREFIX = 'ms_list_cache_v1_';
+function listCacheKey(key) { return LIST_CACHE_PREFIX + key; }
+function readListCache(key) {
+  try {
+    var raw = window.localStorage.getItem(listCacheKey(key));
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+function writeListCache(key, data) {
+  try { window.localStorage.setItem(listCacheKey(key), JSON.stringify(data)); } catch (e) { /* storage full/blocked: live fetch still works */ }
+}
+/* Write html into el only when it changed; returns true when written. */
+function setHtmlIfChanged(el, html) {
+  if (!el) { return false; }
+  if (el._msHtml === html) { return false; }
+  el.innerHTML = html;
+  el._msHtml = html;
+  return true;
+}
+
 /* ================= Mark as Complete (v1.0.14) ================= */
 /* Every folder / section / note / practice sheet — and every test and
  * practice-set card — has a 3-dot menu with "Mark as complete": a
  * green-circled tick shows on the row/card. The completion is stored
  * on the server keyed by device_id (ms_completions), so the tick
  * follows this device. Test cards use item_type "test", practice
- * cards use item_type "practice", so the two never collide. */
+ * cards use item_type "practice", so the two never collide.
+ * v1.0.24 build 26: the same menu + tick is on every Tests/Practice
+ * nav row too — subject, chapter and exam rows ('test-subject',
+ * 'test-chapter', 'test-exam', 'practice-subject', 'practice-chapter',
+ * 'practice-exam'); a parent also shows the tick when ALL its
+ * children are marked (see navRowCompleteHtml + *Done helpers). */
 var completions = {}; // "type:id" -> true
 
 async function loadCompletions() {
@@ -435,8 +471,7 @@ function closeRowMenu() {
  * (breadcrumb to go back), sections expand to show their items,
  * items open their Drive link on tap.
  * Inside a folder: "New folder" / "New section" create row.
- * Inside an open section: Note / Practice sheet upload
- * cards — both kinds, on every browser screen. */
+ * Inside an open section: its items, listed below the section row. */
 function createBrowser(opts) {
   var state = { folderId: null, path: [], foldersById: {}, expanded: {} };
 
@@ -450,116 +485,57 @@ function createBrowser(opts) {
     c.innerHTML = html;
   }
 
-  /* Create row, inside the CURRENT folder ("All" = top level).
-   * New folder works at any level; New section needs a folder open. */
+  /* v1.0.24: Notes is a PURE USER interface — no folder/section
+   * creation here at all (her order). All folders, sections and
+   * uploads come from Muse in chat. The create box stays hidden
+   * and empty; its handlers are removed below. */
   function renderCreate() {
     var box = $(opts.create);
     if (!box) { return; }
-    box.hidden = false;
-    var html = '<div class="row-form"><input class="field-input" data-new-folder type="text" placeholder="Folder name" autocomplete="off" />' +
-      '<button class="btn-secondary" data-add-folder type="button">Add folder</button></div>' +
-      '<p class="muted small" data-folder-status></p>';
-    if (state.folderId) {
-      html += '<div class="row-form"><input class="field-input" data-new-section type="text" placeholder="Section name" autocomplete="off" />' +
-        '<button class="btn-secondary" data-add-section type="button">Add section</button></div>' +
-        '<p class="muted small" data-section-status></p>';
-    } else {
-      html += '<p class="muted small">Open a folder first.</p>';
-    }
-    box.innerHTML = html;
+    box.hidden = true;
+    box.innerHTML = '';
   }
 
-  function setCreateStatus(kind, msg) {
-    var box = $(opts.create);
-    if (!box) { return; }
-    var el = box.querySelector('[data-' + kind + '-status]');
-    if (el) { el.textContent = msg; }
-  }
-
-  async function createFolder() {
-    var box = $(opts.create);
-    if (!box) { return; }
-    var input = box.querySelector('[data-new-folder]');
-    var name = (input && input.value ? input.value : '').trim();
-    if (!name) { setCreateStatus('folder', 'Enter a name.'); return; }
-    var btn = box.querySelector('[data-add-folder]');
-    if (btn) { btn.disabled = true; }
-    setCreateStatus('folder', 'Creating…');
-    try {
-      await apiCall('/folders/create', { name: name, parentId: state.folderId, scope: opts.scope });
-      if (input) { input.value = ''; }
-      setCreateStatus('folder', 'Folder created.');
-      load();
-    } catch (e) {
-      setCreateStatus('folder', e.message || 'Try again.');
-    } finally {
-      if (btn) { btn.disabled = false; }
-    }
-  }
-
-  async function createSection() {
-    var box = $(opts.create);
-    if (!box) { return; }
-    if (!state.folderId) { setCreateStatus('section', 'Open a folder first.'); return; }
-    var input = box.querySelector('[data-new-section]');
-    var name = (input && input.value ? input.value : '').trim();
-    if (!name) { setCreateStatus('section', 'Enter a name.'); return; }
-    var btn = box.querySelector('[data-add-section]');
-    if (btn) { btn.disabled = true; }
-    setCreateStatus('section', 'Creating…');
-    try {
-      await apiCall('/sections/create', { name: name, folderId: state.folderId });
-      if (input) { input.value = ''; }
-      setCreateStatus('section', 'Section created.');
-      load();
-    } catch (e) {
-      setCreateStatus('section', e.message || 'Try again.');
-    } finally {
-      if (btn) { btn.disabled = false; }
-    }
-  }
-
-  /* Upload cards inside an open section — all three kinds, every screen.
-   * data-section carries the section id for the upload. */
-  function uploadCardsHtml(sectionId) {
-    var kinds = [['note', 'Note'], ['sheet', 'Practice sheet']];
-    var html = '<div class="section-uploads">';
-    kinds.forEach(function (k) {
-      html += '<div class="upload-card" data-section="' + esc(sectionId) + '">' +
-        '<div class="upload-title">Upload ' + k[1] + '</div>' +
-        '<input class="field-input" data-up-title="' + k[0] + '" type="text" placeholder="Title" autocomplete="off" />' +
-        '<input class="field-input file-input" data-up-file="' + k[0] + '" type="file" />' +
-        '<button class="btn-primary" data-up-btn="' + k[0] + '" type="button">Upload</button>' +
-        '<p class="muted small" data-up-status="' + k[0] + '"></p>' +
-        '</div>';
-    });
-    return html + '</div>';
-  }
+  function setCreateStatus(kind, msg) { /* v1.0.24: create UI removed */ }
 
   async function loadSectionItems(sectionId, box, silent) {
-    if (!silent) { box.innerHTML = '<p class="muted">Loading…</p>'; }
+    /* v1.0.24 no-blink: paint the cached items instantly (no
+     * "Loading…" flash), then refresh silently; rewrite the box
+     * only when the items actually changed. */
+    var cacheKey = 'section-items:' + sectionId;
+    if (!silent) {
+      var cachedItems = readListCache(cacheKey);
+      if (cachedItems) { setHtmlIfChanged(box, sectionItemsHtml(cachedItems)); }
+      else if (!box.innerHTML) { box.innerHTML = '<p class="muted">Loading…</p>'; }
+    }
     box.hidden = false;
     try {
       var data = await apiCall('/items/list', { folderId: state.folderId, sectionId: sectionId });
       var items = (data && data.items) || [];
       if (opts.kind) { items = items.filter(function (it) { return it.kind === opts.kind; }); }
-      var html = '';
-      if (items.length === 0) { html = '<p class="muted">Empty.</p>'; }
-      items.forEach(function (it) {
-        // FIX 7 (v1.0.12): items open in the in-app viewer — never Drive.
-        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-item="1" data-item-id="' + esc(it.id || '') + '" data-item-kind="' + esc(it.kind || '') + '" data-item-title="' + esc(it.title || '') + '" data-item-file="' + esc(it.drive_file_id || '') + '">' +
-          esc(it.title || '') + '</button>' +
-          (isComplete('item', it.id) ? '<span class="complete-tick">✓</span>' : '') +
-          '<button type="button" class="row-dot" data-dot-type="item" data-dot-id="' + esc(it.id || '') + '" aria-label="Options">⋮</button></div>';
-      });
-      html += uploadCardsHtml(sectionId);
-      box.innerHTML = html;
+      writeListCache(cacheKey, items);
+      setHtmlIfChanged(box, sectionItemsHtml(items));
     } catch (e) {
-      if (!silent) {
+      if (!silent && !box.innerHTML) {
         box.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
       }
       if (silent) { throw e; }
     }
+  }
+
+  /* v1.0.24: item rows for one section (extracted so the cached paint
+   * and the fresh fetch render identically). */
+  function sectionItemsHtml(items) {
+    var html = '';
+    if (!items || items.length === 0) { return '<p class="muted">Empty.</p>'; }
+    items.forEach(function (it) {
+      // FIX 7 (v1.0.12): items open in the in-app viewer — never Drive.
+      html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-item="1" data-item-id="' + esc(it.id || '') + '" data-item-kind="' + esc(it.kind || '') + '" data-item-title="' + esc(it.title || '') + '" data-item-file="' + esc(it.drive_file_id || '') + '">' +
+        esc(it.title || '') + '</button>' +
+        (isComplete('item', it.id) ? '<span class="complete-tick">✓</span>' : '') +
+        '<button type="button" class="row-dot" data-dot-type="item" data-dot-id="' + esc(it.id || '') + '" aria-label="Options">⋮</button></div>';
+    });
+    return html;
   }
 
   function toggleSection(sectionId, box) {
@@ -567,59 +543,9 @@ function createBrowser(opts) {
     loadSectionItems(sectionId, box);
   }
 
-  async function uploadIntoSection(btn) {
-    var kind = btn.getAttribute('data-up-btn');
-    var card = btn.closest('.upload-card');
-    if (!card || !kind) { return; }
-    var sectionId = card.getAttribute('data-section');
-    var titleInput = card.querySelector('[data-up-title="' + kind + '"]');
-    var fileInput = card.querySelector('[data-up-file="' + kind + '"]');
-    var status = card.querySelector('[data-up-status="' + kind + '"]');
-    var file = fileInput && fileInput.files && fileInput.files[0];
-    if (!file) { if (status) { status.textContent = 'Choose a file.'; } return; }
-    var title = (titleInput && titleInput.value ? titleInput.value : '').trim();
-    btn.disabled = true;
-    if (status) { status.textContent = 'Uploading…'; }
-    try {
-      await window.MsDrive.upload(file, title, kind, state.folderId, sectionId);
-      if (status) { status.textContent = 'Uploaded.'; }
-      if (fileInput) { fileInput.value = ''; }
-      if (titleInput) { titleInput.value = ''; }
-      var box = $(opts.list + '-sec-' + sectionId);
-      if (box) { loadSectionItems(sectionId, box); }
-    } catch (e) {
-      if (status) { status.textContent = e.message || 'Try again.'; }
-    } finally {
-      btn.disabled = false;
-    }
-  }
-
-  /* Delete: confirm first; the folder delete also removes
-   * its subfolders, sections and items server-side. If the deleted folder
-   * is the one (or an ancestor of the one) currently open, go back to
-   * the top level instead of showing a dead breadcrumb. */
-  async function deleteFolder(folderId) {
-    if (!window.confirm('Delete this folder and everything inside it?')) { return; }
-    try {
-      await apiCall('/folders/delete', { folderId: folderId });
-      if (state.folderId === folderId || state.path.some(function (p) { return p.id === folderId; })) {
-        state.folderId = null; state.path = []; state.expanded = {};
-      }
-      load();
-    } catch (e) {
-      setCreateStatus('folder', e.message || 'Try again.');
-    }
-  }
-
-  async function deleteSection(sectionId) {
-    if (!window.confirm('Delete this section and its items?')) { return; }
-    try {
-      await apiCall('/sections/delete', { sectionId: sectionId });
-      load();
-    } catch (e) {
-      setCreateStatus('section', e.message || 'Try again.');
-    }
-  }
+  /* v1.0.24: delete controls are GONE from Notes (pure user
+   * interface — folders/sections are managed by Muse in chat).
+   * deleteFolder/deleteSection removed with their × buttons. */
 
   function openFolder(id, name) {
     state.folderId = id;
@@ -641,35 +567,56 @@ function createBrowser(opts) {
     load();
   }
 
+  /* v1.0.24: folder/section/item rows for this browser (extracted so
+   * the cached paint and the fresh fetch render identically).
+   * NO delete (×) buttons — Notes is a pure user interface now. */
+  function browserHtml(folders, sections, items) {
+    var html = '';
+    folders.forEach(function (f) {
+      html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-folder="' + esc(f.id) + '">' + '📁 ' + esc(f.name) + '</button>' +
+        (isComplete('folder', f.id) ? '<span class="complete-tick">✓</span>' : '') +
+        '<button type="button" class="row-dot" data-dot-type="folder" data-dot-id="' + esc(f.id) + '" aria-label="Options">⋮</button></div>';
+    });
+    sections.forEach(function (s) {
+      // FIX 8 (v1.0.12): a section with EXACTLY ONE item opens that item
+      // directly on tap — no item row, no expand. 0 or 2+ items keep the
+      // normal expand behaviour. The hidden section-items div stays so
+      // the section can expand to show its items.
+      var single = (s.item_count === 1 && s.single_item) ? s.single_item : null;
+      var openAttrs = '';
+      if (single) {
+        openAttrs = ' data-open-item="1" data-item-kind="' + esc(single.kind || '') + '" data-item-title="' + esc(single.title || '') + '" data-item-file="' + esc(single.drive_file_id || '') + '"';
+      }
+      html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-section="' + esc(s.id) + '"' + openAttrs + '>' + '▸ ' + esc(s.name) + '</button>' +
+        (isComplete('section', s.id) ? '<span class="complete-tick">✓</span>' : '') +
+        '<button type="button" class="row-dot" data-dot-type="section" data-dot-id="' + esc(s.id) + '" aria-label="Options">⋮</button></div>';
+      html += '<div class="section-items" id="' + opts.list + '-sec-' + esc(s.id) + '" hidden></div>';
+    });
+    items.forEach(function (it) {
+      // FIX 7 (v1.0.12): items open in the in-app viewer — never Drive.
+      html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-item="1" data-item-id="' + esc(it.id || '') + '" data-item-kind="' + esc(it.kind || '') + '" data-item-title="' + esc(it.title || '') + '" data-item-file="' + esc(it.drive_file_id || '') + '">' +
+        esc(it.title || '') + '</button>' +
+        (isComplete('item', it.id) ? '<span class="complete-tick">✓</span>' : '') +
+        '<button type="button" class="row-dot" data-dot-type="item" data-dot-id="' + esc(it.id || '') + '" aria-label="Options">⋮</button></div>';
+    });
+    if (!html) { html = '<p class="muted">Empty.</p>'; }
+    return html;
+  }
+
+  function browserCacheKey() { return 'browser:' + (opts.scope || '') + ':' + (state.folderId || 'root'); }
+
   async function load(silent) {
     var list = $(opts.list);
     if (!list) { return; }
-    // v1.0.13 FIX (PDF upload bug, user video 2026-11-24 22:54 IST):
-    // the 0.5s silent poll rebuilt the whole list AND every open
-    // section (including its upload card) every 500ms — so a picked
-    // PDF file was wiped within half a second, before she could tap
-    // Upload ("Choose a file." every time, upload never happened).
-    // A silent refresh must NEVER run while an upload is in progress:
-    // if any open section's upload card has a file picked, or the user
-    // is typing in it, skip this refresh entirely — the next poll
-    // (500ms later) will pick up new items once the upload is done.
-    if (silent) {
-      var uploadBusy = false;
-      list.querySelectorAll('.section-items').forEach(function (box) {
-        if (box.hidden) { return; }
-        var fis = box.querySelectorAll('.file-input');
-        for (var i = 0; i < fis.length; i++) {
-          if (fis[i].files && fis[i].files.length) { uploadBusy = true; }
-        }
-        if (box.contains(document.activeElement) && document.activeElement && document.activeElement.tagName === 'INPUT') { uploadBusy = true; }
-      });
-      if (uploadBusy) { return; }
-    }
+    // v1.0.23 web build 25: no uploads exist in the app any more
+    // (uploads come from Muse in chat), so the silent poll needs no
+    // upload-busy guard — it just refreshes the list.
     // FIX 10 (v1.0.12): a silent refresh (background poll) never shows a
     // spinner, never wipes the list on a transient failure, never resets
     // the scroll, and keeps open sections open (refreshing their items).
     var openSections = [];
     var scrollY = 0;
+    var painted = false;
     if (silent) {
       scrollY = window.scrollY || 0;
       list.querySelectorAll('.section-items').forEach(function (box) {
@@ -681,7 +628,17 @@ function createBrowser(opts) {
     } else {
       renderCrumb();
       renderCreate();
-      list.innerHTML = '<p class="muted">Loading…</p>';
+      /* v1.0.24 no-blink: paint the last good list instantly from
+       * cache — "Loading…" only when there is nothing cached yet. */
+      var cached = readListCache(browserCacheKey());
+      if (cached) {
+        state.foldersById = {};
+        (cached.folders || []).forEach(function (f) { state.foldersById[f.id] = f.name; });
+        setHtmlIfChanged(list, browserHtml(cached.folders || [], cached.sections || [], cached.items || []));
+        painted = true;
+      } else {
+        list.innerHTML = '<p class="muted">Loading…</p>';
+      }
     }
     try {
       var fdata = await apiCall('/folders/list', { parentId: state.folderId, scope: opts.scope });
@@ -700,49 +657,20 @@ function createBrowser(opts) {
       if (opts.kind) { items = items.filter(function (it) { return it.kind === opts.kind; }); }
       state.foldersById = {};
       folders.forEach(function (f) { state.foldersById[f.id] = f.name; });
-      var html = '';
-      folders.forEach(function (f) {
-        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-folder="' + esc(f.id) + '">' + '📁 ' + esc(f.name) + '</button>' +
-          (isComplete('folder', f.id) ? '<span class="complete-tick">✓</span>' : '') +
-          '<button type="button" class="row-dot" data-dot-type="folder" data-dot-id="' + esc(f.id) + '" aria-label="Options">⋮</button>' +
-          '<button type="button" class="row-del" data-del-folder="' + esc(f.id) + '" aria-label="Delete folder">×</button></div>';
+      writeListCache(browserCacheKey(), { folders: folders, sections: sections, items: items });
+      /* v1.0.24 no-blink: rewrite the list ONLY when the rows actually
+       * changed — an unchanged poll round touches nothing on screen. */
+      setHtmlIfChanged(list, browserHtml(folders, sections, items));
+      painted = true;
+      // Re-open the sections that were open before the refresh, and
+      // refresh their items in place (each box rewrites only on change).
+      openSections.forEach(function (sid) {
+        var box = $(opts.list + '-sec-' + sid);
+        if (box) { loadSectionItems(sid, box, true); }
       });
-      sections.forEach(function (s) {
-        // FIX 8 (v1.0.12): a section with EXACTLY ONE item opens that item
-        // directly on tap — no item row, no expand. 0 or 2+ items keep the
-        // normal expand behaviour. The hidden section-items div stays so
-        // upload/delete still have their box.
-        var single = (s.item_count === 1 && s.single_item) ? s.single_item : null;
-        var openAttrs = '';
-        if (single) {
-          openAttrs = ' data-open-item="1" data-item-kind="' + esc(single.kind || '') + '" data-item-title="' + esc(single.title || '') + '" data-item-file="' + esc(single.drive_file_id || '') + '"';
-        }
-        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-section="' + esc(s.id) + '"' + openAttrs + '>' + '▸ ' + esc(s.name) + '</button>' +
-          (isComplete('section', s.id) ? '<span class="complete-tick">✓</span>' : '') +
-          '<button type="button" class="row-dot" data-dot-type="section" data-dot-id="' + esc(s.id) + '" aria-label="Options">⋮</button>' +
-          '<button type="button" class="row-del" data-del-section="' + esc(s.id) + '" aria-label="Delete section">×</button></div>';
-        html += '<div class="section-items" id="' + opts.list + '-sec-' + esc(s.id) + '" hidden></div>';
-      });
-      items.forEach(function (it) {
-        // FIX 7 (v1.0.12): items open in the in-app viewer — never Drive.
-        html += '<div class="row-wrap"><button type="button" class="row-item row-main" data-item="1" data-item-id="' + esc(it.id || '') + '" data-item-kind="' + esc(it.kind || '') + '" data-item-title="' + esc(it.title || '') + '" data-item-file="' + esc(it.drive_file_id || '') + '">' +
-          esc(it.title || '') + '</button>' +
-          (isComplete('item', it.id) ? '<span class="complete-tick">✓</span>' : '') +
-          '<button type="button" class="row-dot" data-dot-type="item" data-dot-id="' + esc(it.id || '') + '" aria-label="Options">⋮</button></div>';
-      });
-      if (!html) { html = '<p class="muted">Empty.</p>'; }
-      list.innerHTML = html;
-      if (silent) {
-        // Re-open the sections that were open before the refresh, and
-        // refresh their items in place.
-        openSections.forEach(function (sid) {
-          var box = $(opts.list + '-sec-' + sid);
-          if (box) { loadSectionItems(sid, box, true); }
-        });
-        if (scrollY) { window.scrollTo(0, scrollY); }
-      }
+      if (silent && scrollY) { window.scrollTo(0, scrollY); }
     } catch (e) {
-      if (!silent) {
+      if (!silent && !painted) {
         list.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
       }
       // Silent: keep the old content; the next poll retries. Re-throw so
@@ -760,13 +688,8 @@ function createBrowser(opts) {
         goCrumb(b.getAttribute('data-crumb'));
       });
     }
-    var createBox = $(opts.create);
-    if (createBox) {
-      createBox.addEventListener('click', function (ev) {
-        if (ev.target.closest('[data-add-folder]')) { createFolder(); return; }
-        if (ev.target.closest('[data-add-section]')) { createSection(); return; }
-      });
-    }
+    /* v1.0.24: no create-box binding and no delete handlers — Notes
+     * is a pure user interface (create/delete removed above). */
     var list = $(opts.list);
     if (list) {
       list.addEventListener('click', function (ev) {
@@ -774,21 +697,6 @@ function createBrowser(opts) {
         // opens the folder/section/item underneath it.
         var dot = ev.target.closest('[data-dot-type]');
         if (dot) { openRowMenu(dot.getAttribute('data-dot-type'), dot.getAttribute('data-dot-id'), dot); return; }
-        var df = ev.target.closest('[data-del-folder]');
-        if (df) { deleteFolder(df.getAttribute('data-del-folder')); return; }
-        var ds = ev.target.closest('[data-del-section]');
-        if (ds) { deleteSection(ds.getAttribute('data-del-section')); return; }
-        var up = ev.target.closest('[data-up-btn]');
-        if (up) { uploadIntoSection(up); return; }
-        /* Taps inside an upload card (title / file inputs, status text)
-         * must NOT toggle the section: the card itself carries
-         * data-section (uploadIntoSection reads the section id from it),
-         * so closest('[data-section]') below would match the card and
-         * collapse the open section. That hid the card the moment the
-         * user tapped the file input, and re-expanding re-rendered the
-         * card and wiped the picked file — so no upload could ever
-         * complete ("Choose a file." every time). */
-        if (ev.target.closest('.upload-card')) { return; }
         // FIX 8 (v1.0.12): a single-item section opens its item directly —
         // checked BEFORE the normal section toggle, so it never expands.
         var oi = ev.target.closest('[data-open-item]');
@@ -940,7 +848,7 @@ var practiceBrowser = createBrowser({ crumb: 'practiceCrumb', list: 'practiceLis
 
 /* ================= Tests screen: saved tests ================= */
 /* v1.0.14 (user order 2026-11-25): AI test generation REMOVED entirely —
- * tests are now uploaded manually (checked answers) and visible to all.
+ * tests are now added by Muse (checked answers) and visible to all.
  * The AI form is gone from the app; this only refreshes saved tests. */
 function refreshTestsScreen() {
   refreshSavedTests();
@@ -1020,61 +928,133 @@ function navRowHtml(label, attr, val) {
     '<span class="row-label">📁 ' + esc(label) + '</span></button>';
 }
 
+/* v1.0.24 build 26 (her order 2026-11-27 08:52 IST: Mark as Complete
+ * EVERYWHERE): the same green-circled tick + 3-dot menu as the Notes
+ * rows and test/practice cards, for every Tests/Practice nav row —
+ * subject, chapter and exam. Item types are 'test-subject',
+ * 'test-chapter', 'test-exam', 'practice-subject', 'practice-chapter',
+ * 'practice-exam'; the item_id is the row's path joined with '|'.
+ * Marking a parent marks ONLY that row, never its children. A parent
+ * ALSO shows the tick when ALL its children are marked (derived). */
+function testSubjectKey(exam, subject) { return exam ? exam + '|' + subject : subject; }
+function testChapterKey(subject, chapter) { return subject + '|' + chapter; }
+function testChapterDone(exam, subject, chapter) {
+  if (isComplete('test-chapter', testChapterKey(subject, chapter))) { return true; }
+  var ts = testsForChapter(exam, subject, chapter);
+  return ts.length > 0 && ts.every(function (t) { return isComplete('test', t.id); });
+}
+function testSubjectDone(exam, subject) {
+  if (isComplete('test-subject', testSubjectKey(exam, subject))) { return true; }
+  if (exam) { /* sectional: children are the tests directly */
+    var ts = testsForSubject(exam, subject);
+    return ts.length > 0 && ts.every(function (t) { return isComplete('test', t.id); });
+  }
+  var chs = chaptersForSubject(subject);
+  return chs.length > 0 && chs.every(function (c) { return testChapterDone(null, subject, c); });
+}
+function testExamDone(exam) {
+  if (isComplete('test-exam', exam)) { return true; }
+  var subs = uniqueSorted(testsForExam(exam).map(function (t) { return testCategoryOf(t); }));
+  return subs.length > 0 && subs.every(function (s) { return testSubjectDone(exam, s); });
+}
+function practiceSubjectKey(exam, subject) { return exam + '|' + subject; }
+function practiceChapterKey(exam, subject, chapter) { return exam + '|' + subject + '|' + chapter; }
+function practiceChapterDone(exam, subject, chapter) {
+  if (isComplete('practice-chapter', practiceChapterKey(exam, subject, chapter))) { return true; }
+  var ss = practiceForChapter(exam, subject, chapter);
+  return ss.length > 0 && ss.every(function (t) { return isComplete('practice', t.id); });
+}
+function practiceSubjectDone(exam, subject) {
+  if (isComplete('practice-subject', practiceSubjectKey(exam, subject))) { return true; }
+  var chs = practiceChaptersForSubject(exam, subject);
+  if (chs.length) { return chs.every(function (c) { return practiceChapterDone(exam, subject, c); }); }
+  var ss = practiceForSubject(exam, subject);
+  return ss.length > 0 && ss.every(function (t) { return isComplete('practice', t.id); });
+}
+function practiceExamDone(exam) {
+  if (isComplete('practice-exam', exam)) { return true; }
+  var subs = uniqueSorted(practiceForExam(exam).map(function (t) { return practiceCategoryOf(t); }));
+  return subs.length > 0 && subs.every(function (s) { return practiceSubjectDone(exam, s); });
+}
+/* Same nav row as navRowHtml, plus the completion tick on the RIGHT
+ * (when done) and the 3-dot menu that toggles this row. */
+function navRowCompleteHtml(label, attr, val, itemType, itemId, done) {
+  return '<div class="row-wrap"><button type="button" class="row-item test-nav-row" ' + attr + '="' + esc(val) + '">' +
+    '<span class="row-label">📁 ' + esc(label) + '</span></button>' +
+    (done ? '<span class="complete-tick">✓</span>' : '') +
+    '<button type="button" class="row-dot" data-dot-type="' + esc(itemType) + '" data-dot-id="' + esc(itemId) + '" aria-label="Options">⋮</button></div>';
+}
+
 async function refreshSavedTests(silent) {
   var list = $('savedTestsList');
   if (!list) { return; }
+  /* v1.0.24 no-blink: paint the cached test list instantly (the
+   * /tests/list payload is ~600 KB — minutes on a 2-9 KB/s link),
+   * then refresh silently; rewrite only when the rows changed. */
   if (!silent) {
-    list.innerHTML = '<p class="muted">Loading…</p>';
-    $('testDetail').textContent = '';
+    var cachedTests = readListCache('tests:all');
+    if (cachedTests) {
+      allTestsCache = cachedTests;
+      renderSavedTestsList(cachedTests, list);
+    } else {
+      list.innerHTML = '<p class="muted">Loading…</p>';
+      $('testDetail').textContent = '';
+    }
   }
   try {
     var data = await apiCall('/tests/list', {});
     var tests = (data && data.tests) || [];
     allTestsCache = tests;
-    var tabList = tabTests();
-    if (tabList.length === 0) { list.innerHTML = '<p class="muted">No tests yet.</p>'; return; }
-    // Chapter tab: subjects straight away (NO exam level — Vidyagram
-    // names no exam for chapter tests). Sectional tab: exam folders
-    // (full name only, NO counts).
-    if ((window.__testsTab || 'chapter') === 'chapter') {
-      var subjects = uniqueSorted(tabList.map(function (t) { return testCategoryOf(t); }));
-      list.innerHTML = subjects.map(function (s) { return navRowHtml(s, 'data-test-subject', s); }).join('');
-    } else {
-      var exams = uniqueSorted(tabList.map(function (t) { return testExamOf(t); }));
-      list.innerHTML = exams.map(function (ex) { return navRowHtml(ex, 'data-test-exam', ex); }).join('');
-    }
-    // Per-test last-attempt checks (a silent poll skips them — the
-    // attempt state is already known from the initial load).
-    if (silent) { return; }
-    savedAttempts = {};
-    tests.forEach(function (t) {
-      apiCall('/tests/last-attempt', { testId: t.id }).then(function (d) {
-        lastAttemptChecked[t.id] = true;
-        if (d && d.attempt) { savedAttempts[t.id] = d.attempt; }
-      }).catch(function () { lastAttemptChecked[t.id] = true; });
-    });
+    writeListCache('tests:all', tests);
+    renderSavedTestsList(tests, list);
   } catch (e) {
-    if (!silent) {
+    if (!silent && !list._msHtml) {
       list.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
     }
     if (silent) { throw e; }
   }
 }
 
+/* v1.0.24: the top-level Tests rows (subjects or exams), extracted so
+ * the cached paint and the fresh fetch render identically. */
+function renderSavedTestsList(tests, list) {
+  var tabList = tabTests();
+  if (tabList.length === 0) { setHtmlIfChanged(list, '<p class="muted">No tests yet.</p>'); return; }
+  // Chapter tab: subjects straight away (NO exam level — Vidyagram
+  // names no exam for chapter tests). Sectional tab: exam folders
+  // (full name only, NO counts).
+  var html = '';
+  if ((window.__testsTab || 'chapter') === 'chapter') {
+    var subjects = uniqueSorted(tabList.map(function (t) { return testCategoryOf(t); }));
+    html = subjects.map(function (s) { return navRowCompleteHtml(s, 'data-test-subject', s, 'test-subject', testSubjectKey(null, s), testSubjectDone(null, s)); }).join('');
+  } else {
+    var exams = uniqueSorted(tabList.map(function (t) { return testExamOf(t); }));
+    html = exams.map(function (ex) { return navRowCompleteHtml(ex, 'data-test-exam', ex, 'test-exam', ex, testExamDone(ex)); }).join('');
+  }
+  setHtmlIfChanged(list, html);
+  /* v1.0.24: NO per-test last-attempt pre-warm here — it fired one
+   * /tests/last-attempt call per test (~1,700 parallel calls) on
+   * every load, clogging a slow connection and flickering cards as
+   * results trickled in. renderTestList already checks the attempts
+   * for the tests actually on screen. */
+}
+
 function renderTestSubjects(exam) {
   var subjects = uniqueSorted(testsForExam(exam).map(function (t) { return testCategoryOf(t); }));
   $('testSubjectsTitle').textContent = exam;
-  $('testSubjectList').innerHTML = subjects.length
-    ? subjects.map(function (s) { return navRowHtml(s, 'data-test-subject', s); }).join('')
-    : '<p class="muted">No subjects.</p>';
+  /* v1.0.24 no-blink: rewrite only when the rows changed. */
+  setHtmlIfChanged($('testSubjectList'), subjects.length
+    ? subjects.map(function (s) { return navRowCompleteHtml(s, 'data-test-subject', s, 'test-subject', testSubjectKey(exam, s), testSubjectDone(exam, s)); }).join('')
+    : '<p class="muted">No subjects.</p>');
 }
 
 function renderTestChapters(subject) {
   var chapters = chaptersForSubject(subject);
   $('testChaptersTitle').textContent = subject;
-  $('testChapterList').innerHTML = chapters.length
-    ? chapters.map(function (c) { return navRowHtml(c, 'data-test-chapter', c); }).join('')
-    : '<p class="muted">No chapters.</p>';
+  /* v1.0.24 no-blink: rewrite only when the rows changed. */
+  setHtmlIfChanged($('testChapterList'), chapters.length
+    ? chapters.map(function (c) { return navRowCompleteHtml(c, 'data-test-chapter', c, 'test-chapter', testChapterKey(subject, c), testChapterDone(testsNav.exam, subject, c)); }).join('')
+    : '<p class="muted">No chapters.</p>');
 }
 
 /* v1.0.23: every test / practice card has a 3-dot menu (Mark as
@@ -1120,9 +1100,11 @@ function renderTestList(tests, title, ids, completeType) {
   var listEl = $(ids.list);
   var detailEl = $(ids.detail);
   if (detailEl) { detailEl.textContent = ''; }
-  if (!tests.length) { listEl.innerHTML = '<p class="muted">No tests.</p>'; return; }
+  if (!tests.length) { setHtmlIfChanged(listEl, '<p class="muted">No tests.</p>'); return; }
   var kind = completeType || 'test';
-  listEl.innerHTML = tests.map(function (t) { return testCardHtml(t, kind); }).join('');
+  /* v1.0.24 no-blink: rewrite the cards only when they changed —
+   * the per-test attempt buttons below still update in place. */
+  setHtmlIfChanged(listEl, tests.map(function (t) { return testCardHtml(t, kind); }).join(''));
   // For each test, check THIS user's latest attempt and swap the card's
   // buttons: Attempt only when never taken; Result + Re-attempt when taken.
   tests.forEach(function (t) {
@@ -1208,6 +1190,8 @@ $('testsTabs').addEventListener('click', function (ev) {
 });
 
 $('savedTestsList').addEventListener('click', function (ev) {
+  var dot = ev.target.closest('[data-dot-type]');
+  if (dot) { openRowMenu(dot.getAttribute('data-dot-type'), dot.getAttribute('data-dot-id'), dot); return; }
   // Chapter tab: the Tests screen lists subjects — tap one to see its
   // chapters. Sectional tab: it lists exams — tap one to see subjects.
   var s = ev.target.closest('[data-test-subject]');
@@ -1218,12 +1202,16 @@ $('savedTestsList').addEventListener('click', function (ev) {
 });
 
 $('testSubjectList').addEventListener('click', function (ev) {
+  var dot = ev.target.closest('[data-dot-type]');
+  if (dot) { openRowMenu(dot.getAttribute('data-dot-type'), dot.getAttribute('data-dot-id'), dot); return; }
   var s = ev.target.closest('[data-test-subject]');
   if (!s) { return; }
   openTestSubject(s.getAttribute('data-test-subject'));
 });
 
 $('testChapterList').addEventListener('click', function (ev) {
+  var dot = ev.target.closest('[data-dot-type]');
+  if (dot) { openRowMenu(dot.getAttribute('data-dot-type'), dot.getAttribute('data-dot-id'), dot); return; }
   var c = ev.target.closest('[data-test-chapter]');
   if (!c) { return; }
   openTestChapter(c.getAttribute('data-test-chapter'));
@@ -1292,53 +1280,105 @@ function practiceForChapter(exam, subject, chapter) {
   return practiceForSubject(exam, subject).filter(function (t) { return practiceChapterOf(t) === chapter; });
 }
 
+/* v1.0.23 web build 25: practice chapter names show English + Hindi,
+ * e.g. "Blood Relation (रक्त संबंध)". Display only — matching still
+ * uses the English DB string; unmapped names fall back to English.
+ * Hindi checked against the book (Rakesh Yadav UPSI Reasoning):
+ * the book's chapter headings are English, so these are the standard
+ * Hindi renderings. The two Miscellaneous chapters are different
+ * (text vs figure) and map to their own Hindi. */
+var PRACTICE_CHAPTER_HINDI = {
+  'Analogy': 'सादृश्य',
+  'Blood Relation': 'रक्त संबंध',
+  'Calendar': 'कैलेंडर',
+  'Classification': 'वर्गीकरण',
+  'Coding-Decoding': 'कोडिंग-डिकोडिंग',
+  'Data Sufficiency': 'आँकड़ों की पर्याप्तता',
+  'Direction': 'दिशा',
+  'Eligibility Test': 'पात्रता परीक्षा',
+  'Inequality': 'असमानता',
+  'Letter Series': 'अक्षर श्रृंखला',
+  'Machine Input-Output': 'मशीन इनपुट-आउटपुट',
+  'Mathematical Operation': 'गणितीय संक्रिया',
+  'Miscellaneous': 'विविध',
+  'Mixed Series': 'मिश्रित श्रृंखला',
+  'Number Series': 'संख्या श्रृंखला',
+  'Passage and Statement': 'गद्यांश और कथन',
+  'Ranking and Order': 'रैंकिंग और क्रम',
+  'Statement & Argument': 'कथन और तर्क',
+  'Statement & Assumption': 'कथन और पूर्वधारणा',
+  'Statement & Conclusion': 'कथन और निष्कर्ष',
+  'Syllogism': 'न्याय निगमन',
+  'Word Arrangement': 'शब्द व्यवस्था',
+  'Word Formation': 'शब्द निर्माण',
+  'Counting of Figure': 'आकृतियों की गिनती',
+  'Dice': 'पासा',
+  'Non Verbal': 'अशाब्दिक',
+  'Figure Completion': 'आकृति पूर्णता',
+  'Mirror and Water Image': 'दर्पण और जल प्रतिबिंब',
+  'Miscellaneous (Figure)': 'विविध - आकृति',
+  'Venn Diagram': 'वेन आरेख'
+};
+function practiceChapterLabel(name) {
+  var hi = PRACTICE_CHAPTER_HINDI[name];
+  return hi ? name + ' (' + hi + ')' : name;
+}
+
 async function refreshPracticeSets(silent) {
   var list = $('practiceSetList');
   if (!list) { return; }
+  /* v1.0.24 no-blink: paint the cached practice list instantly,
+   * then refresh silently; rewrite only when the rows changed. */
   if (!silent) {
-    list.innerHTML = '<p class="muted">Loading…</p>';
-    var det = $('practiceSetDetail');
-    if (det) { det.textContent = ''; }
+    var cachedSets = readListCache('tests:practice');
+    if (cachedSets) {
+      allPracticeCache = cachedSets;
+      renderPracticeExamsList(cachedSets, list);
+    } else {
+      list.innerHTML = '<p class="muted">Loading…</p>';
+      var det = $('practiceSetDetail');
+      if (det) { det.textContent = ''; }
+    }
   }
   try {
     var data = await apiCall('/tests/list', { kind: 'practice' });
     var sets = (data && data.tests) || [];
     allPracticeCache = sets;
-    if (!sets.length) { list.innerHTML = '<p class="muted">No practice sets yet.</p>'; return; }
-    var exams = uniqueSorted(sets.map(function (t) { return practiceExamOf(t); }));
-    list.innerHTML = exams.map(function (ex) { return navRowHtml(ex, 'data-practice-exam', ex); }).join('');
-    // Per-set last-attempt checks (a silent poll skips them — the attempt
-    // state is already known from the initial load). Reuses the shared
-    // savedAttempts / lastAttemptChecked maps (test ids are unique).
-    if (silent) { return; }
-    sets.forEach(function (t) {
-      apiCall('/tests/last-attempt', { testId: t.id }).then(function (d) {
-        lastAttemptChecked[t.id] = true;
-        if (d && d.attempt) { savedAttempts[t.id] = d.attempt; }
-      }).catch(function () { lastAttemptChecked[t.id] = true; });
-    });
+    writeListCache('tests:practice', sets);
+    renderPracticeExamsList(sets, list);
   } catch (e) {
-    if (!silent) {
+    if (!silent && !list._msHtml) {
       list.innerHTML = '<p class="muted">' + esc(e.message || 'Try again.') + '</p>';
     }
     if (silent) { throw e; }
   }
 }
 
+/* v1.0.24: the top-level Practice exam rows, extracted so the cached
+ * paint and the fresh fetch render identically. No per-set
+ * last-attempt pre-warm (same reason as refreshSavedTests). */
+function renderPracticeExamsList(sets, list) {
+  if (!sets.length) { setHtmlIfChanged(list, '<p class="muted">No practice sets yet.</p>'); return; }
+  var exams = uniqueSorted(sets.map(function (t) { return practiceExamOf(t); }));
+  setHtmlIfChanged(list, exams.map(function (ex) { return navRowCompleteHtml(ex, 'data-practice-exam', ex, 'practice-exam', ex, practiceExamDone(ex)); }).join(''));
+}
+
 function renderPracticeSubjects(exam) {
   var subjects = uniqueSorted(practiceForExam(exam).map(function (t) { return practiceCategoryOf(t); }));
   $('practiceSubjectsTitle').textContent = exam;
-  $('practiceSubjectList').innerHTML = subjects.length
-    ? subjects.map(function (s) { return navRowHtml(s, 'data-practice-subject', s); }).join('')
-    : '<p class="muted">No subjects.</p>';
+  /* v1.0.24 no-blink: rewrite only when the rows changed. */
+  setHtmlIfChanged($('practiceSubjectList'), subjects.length
+    ? subjects.map(function (s) { return navRowCompleteHtml(s, 'data-practice-subject', s, 'practice-subject', practiceSubjectKey(exam, s), practiceSubjectDone(exam, s)); }).join('')
+    : '<p class="muted">No subjects.</p>');
 }
 
 function renderPracticeChapters(subject) {
   var chapters = practiceChaptersForSubject(practiceNav.exam, subject);
   $('practiceChaptersTitle').textContent = subject;
-  $('practiceChapterList').innerHTML = chapters.length
-    ? chapters.map(function (c) { return navRowHtml(c, 'data-practice-chapter', c); }).join('')
-    : '<p class="muted">No chapters.</p>';
+  /* v1.0.24 no-blink: rewrite only when the rows changed. */
+  setHtmlIfChanged($('practiceChapterList'), chapters.length
+    ? chapters.map(function (c) { return navRowCompleteHtml(practiceChapterLabel(c), 'data-practice-chapter', c, 'practice-chapter', practiceChapterKey(practiceNav.exam, subject, c), practiceChapterDone(practiceNav.exam, subject, c)); }).join('')
+    : '<p class="muted">No chapters.</p>');
 }
 
 /* v1.0.21: the practice-sets list uses its own ids (practiceSetsList /
@@ -1347,7 +1387,7 @@ function renderPracticeChapters(subject) {
  * that hidden element, so the set cards were drawn off-screen and the
  * chapter page looked empty. */
 function renderPracticeList(tests, title) {
-  renderTestList(tests, title, { title: 'practiceListTitle', list: 'practiceSetsList', detail: 'practiceSetsDetail' }, 'practice');
+  renderTestList(tests, practiceChapterLabel(title), { title: 'practiceListTitle', list: 'practiceSetsList', detail: 'practiceSetsDetail' }, 'practice');
 }
 
 function rerenderPracticeSubPage() {
@@ -1401,18 +1441,24 @@ $('practiceChaptersBackBtn').addEventListener('click', goBackOneStep);
 $('practiceListBackBtn').addEventListener('click', goBackOneStep);
 
 $('practiceSetList').addEventListener('click', function (ev) {
+  var dot = ev.target.closest('[data-dot-type]');
+  if (dot) { openRowMenu(dot.getAttribute('data-dot-type'), dot.getAttribute('data-dot-id'), dot); return; }
   var ex = ev.target.closest('[data-practice-exam]');
   if (!ex) { return; }
   openPracticeExam(ex.getAttribute('data-practice-exam'));
 });
 
 $('practiceSubjectList').addEventListener('click', function (ev) {
+  var dot = ev.target.closest('[data-dot-type]');
+  if (dot) { openRowMenu(dot.getAttribute('data-dot-type'), dot.getAttribute('data-dot-id'), dot); return; }
   var s = ev.target.closest('[data-practice-subject]');
   if (!s) { return; }
   openPracticeSubject(s.getAttribute('data-practice-subject'));
 });
 
 $('practiceChapterList').addEventListener('click', function (ev) {
+  var dot = ev.target.closest('[data-dot-type]');
+  if (dot) { openRowMenu(dot.getAttribute('data-dot-type'), dot.getAttribute('data-dot-id'), dot); return; }
   var c = ev.target.closest('[data-practice-chapter]');
   if (!c) { return; }
   openPracticeChapter(c.getAttribute('data-practice-chapter'));
@@ -1451,7 +1497,7 @@ $('practiceSetsList').addEventListener('click', function (ev) {
 
 /* v1.0.14 (user order 2026-11-25): AI test generation removed — the
  * form, its listeners and the /tests/generate call are all gone. Tests
- * are uploaded manually now and visible to everyone. */
+ * are added by Muse now and visible to everyone. */
 
 /* ================= Take a test ================= */
 /* One question at a time, countdown from duration_min, score computed
@@ -2345,7 +2391,11 @@ function startChat() {
   // ever arrive. The boot-time request evidently never showed (silent
   // failure). Ask again now, while the user is looking at the chat —
   // and show the permission state under the chat, tappable to enable.
-  ensurePushRegistered();
+  // v1.0.24: run the FULL init here (listeners + register), not just
+  // ensurePushRegistered — if the boot-time init ran before the
+  // Capacitor bridge was ready, no 'registration' listener existed
+  // and the FCM token was never captured.
+  initPushNotifications();
   updateChatNotifStatus();
 }
 
@@ -2394,14 +2444,89 @@ function chatListAtBottom() {
   return (list.scrollHeight - list.scrollTop - list.clientHeight) < 60;
 }
 
+/* v1.0.24: one message bubble's HTML (shared by the full render and
+ * the append-only path below). */
+function chatMessageHtml(m, isNew) {
+  var mine = (m.sender_device === chatState.myDeviceId);
+  var quote = '';
+  if (m.reply_to && chatState.byId[m.reply_to]) {
+    quote = '<div class="msg-quote">' + esc(chatState.byId[m.reply_to].body || '') + '</div>';
+  }
+  // FIX 6 (v1.0.12): read receipt on MY messages only — double tick
+  // when the other member's last_read_at is at or after this message's
+  // time, otherwise a single tick. No ticks on their messages.
+  var tick = '';
+  if (mine) {
+    var otherReadAt = chatOtherLastReadAt();
+    var seen = otherReadAt && (new Date(otherReadAt).getTime() >= new Date(m.created_at).getTime());
+    tick = '<span class="msg-tick' + (seen ? ' seen' : '') + '">' + (seen ? '✓✓' : '✓') + '</span>';
+  }
+  return '<div class="msg ' + (mine ? 'msg-mine' : 'msg-theirs') + (isNew ? ' msg-new' : '') + '" data-msg="' + esc(m.id) + '">' +
+    quote + '<div class="msg-body">' + esc(m.body || '') + '</div>' +
+    '<span class="msg-time">' + esc(formatChatTime(m.created_at)) + tick + '</span></div>';
+}
+
+/* v1.0.24: update only the read-receipt ticks on MY messages, in
+ * place — no list rebuild, no scroll jump. */
+function updateChatTicks() {
+  var list = $('chatList');
+  if (!list) { return; }
+  var otherReadAt = chatOtherLastReadAt();
+  list.querySelectorAll('.msg[data-msg]').forEach(function (node) {
+    var m = chatState.byId[node.getAttribute('data-msg')];
+    if (!m || m.sender_device !== chatState.myDeviceId) { return; }
+    var tick = node.querySelector('.msg-tick');
+    if (!tick) { return; }
+    var seen = otherReadAt && (new Date(otherReadAt).getTime() >= new Date(m.created_at).getTime());
+    tick.textContent = seen ? '✓✓' : '✓';
+    tick.classList.toggle('seen', !!seen);
+  });
+}
+
 function renderChatMessages(scroll) {
   var list = $('chatList');
   var atBottom = chatListAtBottom();
   if (!chatState.messages.length) {
-    list.innerHTML = '<p class="muted small" style="text-align:center;padding-top:24px;">No messages yet.</p>';
+    if (!list._msChatEmpty) {
+      list.innerHTML = '<p class="muted small" style="text-align:center;padding-top:24px;">No messages yet.</p>';
+      list._msChatEmpty = true;
+    }
     return;
   }
-  var html = '';
+  list._msChatEmpty = false;
+  var firstRender = !chatState.renderedOnce;
+  /* v1.0.24 APPEND-ONLY (user video 2026-11-27 10:23 IST): the 2s poll
+   * used to rebuild the whole message list (innerHTML) every tick, so
+   * the chat screen blinked. Now, when the nodes on screen are exactly
+   * the leading run of the current list, only the new tail is appended
+   * — nothing already visible is touched. A deletion or an out-of-order
+   * arrival falls through to the full rebuild below. */
+  if (!firstRender) {
+    var nodes = list.querySelectorAll('[data-msg]');
+    var msgs = chatState.messages;
+    var match = nodes.length <= msgs.length;
+    if (match) {
+      for (var k = 0; k < nodes.length; k++) {
+        if (nodes[k].getAttribute('data-msg') !== String(msgs[k].id)) { match = false; break; }
+      }
+    }
+    if (match && nodes.length === msgs.length) {
+      /* Nothing new — ticks may have changed; update them in place. */
+      updateChatTicks();
+      return;
+    }
+    if (match && nodes.length < msgs.length) {
+      for (var j = nodes.length; j < msgs.length; j++) {
+        var tmp = document.createElement('div');
+        tmp.innerHTML = chatMessageHtml(msgs[j], true);
+        list.appendChild(tmp.firstChild);
+        chatState.renderedMsgIds[msgs[j].id] = true;
+      }
+      if (scroll === 'always' || atBottom) { list.scrollTop = list.scrollHeight; }
+      return;
+    }
+  }
+  // Full rebuild: first render, or a deletion / out-of-order arrival.
   // v1.0.13 FIX (pop-up bug, user video 2026-11-24 22:54 IST): the list
   // is fully rebuilt (innerHTML) on every poll, and the CSS animated
   // the LAST message every time — so the latest bubble kept popping
@@ -2410,26 +2535,10 @@ function renderChatMessages(scroll) {
   // that was already rendered never animates again. The first render
   // of a chat open animates nothing (opening the chat must not pop
   // every old message).
-  var firstRender = !chatState.renderedOnce;
+  var html = '';
   chatState.messages.forEach(function (m) {
-    var mine = (m.sender_device === chatState.myDeviceId);
     var isNew = !firstRender && !chatState.renderedMsgIds[m.id];
-    var quote = '';
-    if (m.reply_to && chatState.byId[m.reply_to]) {
-      quote = '<div class="msg-quote">' + esc(chatState.byId[m.reply_to].body || '') + '</div>';
-    }
-    // FIX 6 (v1.0.12): read receipt on MY messages only — double tick
-    // when the other member's last_read_at is at or after this message's
-    // time, otherwise a single tick. No ticks on their messages.
-    var tick = '';
-    if (mine) {
-      var otherReadAt = chatOtherLastReadAt();
-      var seen = otherReadAt && (new Date(otherReadAt).getTime() >= new Date(m.created_at).getTime());
-      tick = '<span class="msg-tick' + (seen ? ' seen' : '') + '">' + (seen ? '✓✓' : '✓') + '</span>';
-    }
-    html += '<div class="msg ' + (mine ? 'msg-mine' : 'msg-theirs') + (isNew ? ' msg-new' : '') + '" data-msg="' + esc(m.id) + '">' +
-      quote + '<div class="msg-body">' + esc(m.body || '') + '</div>' +
-      '<span class="msg-time">' + esc(formatChatTime(m.created_at)) + tick + '</span></div>';
+    html += chatMessageHtml(m, isNew);
   });
   list.innerHTML = html;
   // Remember what was just rendered, so the next re-render (poll tick
@@ -2533,7 +2642,8 @@ async function loadChatMessages(initial) {
       var curRead = chatOtherLastReadAt();
       if (curRead !== chatState._otherReadAt) {
         chatState._otherReadAt = curRead;
-        renderChatMessages();
+        /* v1.0.24: ticks update in place — no list rebuild. */
+        updateChatTicks();
       }
       // FIX 6 (v1.0.12): mark the chat as read when the other person has
       // sent messages — once per poll cycle, silent on failure.

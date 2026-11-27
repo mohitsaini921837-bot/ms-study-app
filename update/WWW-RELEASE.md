@@ -28,6 +28,11 @@ so a new APK always starts from its own bundled www.
   decrease one.
 - The v1.0.23 APK's bundled www **is build 24** (= its `versionCode`).
   `BUNDLED_WWW_BUILD` in `app/www/web-update.js` is 24.
+- **v1.0.24 (2026-11-27): bundles build 26** (`BUNDLED_WWW_BUILD` 26 =
+  max(versionCode 25, latest published wwwBuild 26)) — so the build
+  25+26 web content (upload removal, Hindi practice chapter names,
+  Mark as Complete everywhere) is live on install, with no loader
+  involved. The loader is still the path for later web-only fixes.
 - Web-only releases: 25, 26, 27, …
 - A future APK **must** set its `BUNDLED_WWW_BUILD` to
   `max(its versionCode, latest published wwwBuild)` — otherwise the new

@@ -643,7 +643,10 @@ async function handleItemsList(body: Record<string, unknown>) {
 // ---------------------------------------------------------------------------
 // Mark as Complete (v1.0.14, user order 2026-11-25; NO-PASSWORD rework)
 // Every folder / section / note / practice sheet — and every test and
-// practice-set card (item_type "test" / "practice") — can be marked
+// practice-set card (item_type "test" / "practice") — and every
+// Tests/Practice nav row (item_type "test-subject" / "test-chapter" /
+// "test-exam" / "practice-subject" / "practice-chapter" /
+// "practice-exam", v1.0.24 build 26) — can be marked
 // complete (green tick). The completion is keyed by device_id — NOT by any
 // password hash. (The old password_hash column stays in the table as
 // dead data; see migrations/no-password-completions.sql, which backfills
@@ -674,7 +677,10 @@ async function handleCompleteMark(body: Record<string, unknown>) {
   if (
     !itemType || !itemId ||
     (itemType !== "folder" && itemType !== "section" && itemType !== "item" &&
-      itemType !== "test" && itemType !== "practice")
+      itemType !== "test" && itemType !== "practice" &&
+      itemType !== "test-subject" && itemType !== "test-chapter" &&
+      itemType !== "test-exam" && itemType !== "practice-subject" &&
+      itemType !== "practice-chapter" && itemType !== "practice-exam")
   ) {
     return jsonResponse({ result: "unavailable" }, 400);
   }
@@ -701,7 +707,10 @@ async function handleCompleteUnmark(body: Record<string, unknown>) {
   if (
     !itemType || !itemId ||
     (itemType !== "folder" && itemType !== "section" && itemType !== "item" &&
-      itemType !== "test" && itemType !== "practice")
+      itemType !== "test" && itemType !== "practice" &&
+      itemType !== "test-subject" && itemType !== "test-chapter" &&
+      itemType !== "test-exam" && itemType !== "practice-subject" &&
+      itemType !== "practice-chapter" && itemType !== "practice-exam")
   ) {
     return jsonResponse({ result: "unavailable" }, 400);
   }
@@ -1317,7 +1326,11 @@ async function getFcmAccessToken(): Promise<string | null> {
 // token(s) in this room. Returns silently on any failure.
 async function sendChatPush(roomId: string, senderDeviceId: string): Promise<void> {
   const creds = resolveFcmCredentials();
-  if (!creds) return; // Push not configured — chat still works by polling.
+  // v1.0.24: log loudly when push is not configured — a silent skip
+  // here is why "notifications never arrive" is undiagnosable from
+  // the phone. Set FIREBASE_SERVICE_ACCOUNT_JSON (or the three
+  // FIREBASE_* vars) as Edge Function secrets on the project.
+  if (!creds) { console.error("FCM not configured: set FIREBASE_SERVICE_ACCOUNT_JSON secret"); return; }
   const { data: rows, error } = await supabaseAdmin
     .from("ms_chat_push_tokens")
     .select("device_id, token")

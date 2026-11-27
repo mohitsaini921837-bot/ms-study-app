@@ -46,9 +46,10 @@
 (function () {
   'use strict';
 
-  /* The APK's bundled www IS this build. Must match the APK's
-   * versionCode for v1.0.23; a future APK bumps it (see header). */
-  var BUNDLED_WWW_BUILD = 24;
+  /* The APK's bundled www IS this build. v1.0.24 bundles build 26
+   * (= max(versionCode 25, latest published wwwBuild 26)); a future
+   * APK bumps it (see update/WWW-RELEASE.md). */
+  var BUNDLED_WWW_BUILD = 26;
 
   var LS_KEY = 'ms_www_build';
   var ZIP_PREFIX = 'ms-study-www-';
