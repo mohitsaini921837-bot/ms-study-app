@@ -158,6 +158,12 @@ function scheduleLivePoll(delay) {
 
 async function runLivePoll() {
   livePollTimer = null;
+  /* v1.0.23 scroll smoothness: never fetch + rebuild the visible list
+   * mid-scroll — the rebuild (innerHTML of every row/card, plus the
+   * /tests/list + /folders/list + /sections/list + /items/list round
+   * trips) is what made scrolling stutter every 500ms. Defer until
+   * the scroll settles; the scroll-end handler re-schedules at once. */
+  if (isScrolling) { pollDeferredWhileScrolling = true; scheduleLivePoll(300); return; }
   try {
     await refreshCurrentScreen(true);
     livePollDelay = 500; // success: back to 0.5s
@@ -176,6 +182,27 @@ function startLivePoll() {
 function stopLivePoll() {
   if (livePollTimer) { clearTimeout(livePollTimer); livePollTimer = null; }
 }
+
+/* v1.0.23 scroll smoothness — scroll state shared by the live poll and
+ * the aurora (see styles.css html.is-scrolling). The listener is
+ * passive (never blocks scrolling) and capture-phase, so the inner
+ * scrollers (chat list, palette grid, viewer) pause the poll/aurora
+ * too. Scroll "ends" 150ms after the last scroll event; a poll that
+ * was deferred mid-scroll is then re-scheduled immediately. */
+var isScrolling = false;
+var pollDeferredWhileScrolling = false;
+var scrollEndTimer = null;
+function noteScrollActivity() {
+  isScrolling = true;
+  document.documentElement.classList.add('is-scrolling');
+  if (scrollEndTimer) { clearTimeout(scrollEndTimer); }
+  scrollEndTimer = setTimeout(function () {
+    isScrolling = false;
+    document.documentElement.classList.remove('is-scrolling');
+    if (pollDeferredWhileScrolling) { pollDeferredWhileScrolling = false; scheduleLivePoll(50); }
+  }, 150);
+}
+document.addEventListener('scroll', noteScrollActivity, { capture: true, passive: true });
 
 /* Refresh the current screen when the app comes back to the foreground. */
 document.addEventListener('visibilitychange', function () {

@@ -55,6 +55,7 @@ body {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
+  overscroll-behavior: none;
 }
 /* FIX 5 (v1.0.12): the aurora lives on a FIXED layer behind everything and
    drifts with transform (GPU-composited, cheap). Animating background-position
@@ -78,8 +79,32 @@ body::before {
   50% { transform: translate3d(2%, 1.5%, 0) scale(1.04); }
   100% { transform: translate3d(-2%, -1%, 0) scale(1.02); }
 }
+
+/* ---- v1.0.23 scroll smoothness (user order 2026-11-27 07:54 IST) ----
+ * Root cause: every row/card in the scrolling lists carried its own
+ * backdrop-filter blur, so each scroll frame re-blurred every visible
+ * row — and the aurora behind them never stops moving, so the blur
+ * re-sampled even between scrolls. Blur is therefore REMOVED from the
+ * scrolling-list surfaces only (.row-item, .row-del, .row-dot,
+ * .test-card, .upload-card, .take-review-item, .take-palette-num,
+ * .msg-mine/.msg-theirs, .btn-primary/.btn-secondary inside cards);
+ * they keep the exact same rgba background, border, radius, shadow
+ * and spacing — only the per-frame blur cost is gone. Blur is KEPT on
+ * the few fixed/overlay surfaces where it is cheap and visible:
+ * .app-header, .icon-btn, .bottom-nav, .card, .field-input,
+ * .code-card, .row-menu, .dialog-overlay, .toast, .chat-menu,
+ * .chat-reply, .take-option, .take-solution, .take-summary, .tests-tab.
+ * Off-screen rows/cards also skip paint/layout until scrolled into
+ * view (content-visibility), and the aurora drift pauses while the
+ * user scrolls (html.is-scrolling, set from app.js) so the kept blur
+ * surfaces stop re-sampling a moving backdrop mid-scroll. */
+html.is-scrolling body::before { animation-play-state: paused; }
+.row-wrap { content-visibility: auto; contain-intrinsic-size: auto 56px; }
+.test-card { content-visibility: auto; contain-intrinsic-size: auto 120px; }
+.take-review-item { content-visibility: auto; contain-intrinsic-size: auto 90px; }
+.take-palette-num { content-visibility: auto; contain-intrinsic-size: auto 48px; }
 button, input, select, textarea { font: inherit; }
-button { min-height: 44px; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: var(--morph); will-change: transform; }
+button { min-height: 44px; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: var(--morph); }
 /* Liquid-glass squish: press stretches the button wider + flatter and
    rounds it further toward a pill, then it springs back. */
 button:active { transform: scale(1.03, 0.94); border-radius: 999px; transition: transform 120ms var(--spring), border-radius 120ms var(--spring); }
@@ -228,8 +253,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
   border: 1px solid rgba(255, 255, 255, 0.55);
   background: var(--glass-grad);
   color: #fff;
-  backdrop-filter: blur(12px) saturate(1.4);
-  -webkit-backdrop-filter: blur(12px) saturate(1.4);
   box-shadow: var(--glow-purple), inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 -1px 0 rgba(255, 255, 255, 0.15);
   text-shadow: 0 1px 2px rgba(20, 24, 31, 0.18);
 }
@@ -241,8 +264,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
   border: 1px solid var(--glass-hi);
   background: var(--surface-glass);
   color: var(--ink);
-  backdrop-filter: blur(10px) saturate(1.3);
-  -webkit-backdrop-filter: blur(10px) saturate(1.3);
   box-shadow: 0 4px 16px rgba(20, 24, 31, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 .btn-secondary:active { transform: scale(1.02, 0.93); border-radius: 999px; }
@@ -329,8 +350,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
   border-radius: 14px; padding: 13px 14px; margin-bottom: 8px;
   font-weight: 600; font-size: 15px; color: var(--ink);
   box-shadow: 0 6px 20px rgba(99, 102, 241, 0.12), 0 2px 8px rgba(20, 24, 31, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.85), inset 0 -1px 0 rgba(139, 92, 246, 0.08);
-  backdrop-filter: blur(10px) saturate(1.3);
-  -webkit-backdrop-filter: blur(10px) saturate(1.3);
   transition: var(--morph);
   transform: translateZ(0);
 }
@@ -345,8 +364,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
   border: 1px solid rgba(255, 255, 255, 0.85); background: var(--surface-glass);
   color: var(--red); font-size: 22px; line-height: 1; border-radius: 14px;
   box-shadow: 0 4px 14px rgba(20, 24, 31, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(10px) saturate(1.3);
-  -webkit-backdrop-filter: blur(10px) saturate(1.3);
   transform: translateZ(0);
 }
 .row-del:active { transform: scale(1.06, 0.9); border-radius: 999px; }
@@ -357,8 +374,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
   border: 1px solid rgba(255, 255, 255, 0.85); background: var(--surface-glass);
   color: var(--ink); font-size: 22px; line-height: 1; border-radius: 14px;
   box-shadow: 0 4px 14px rgba(20, 24, 31, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(10px) saturate(1.3);
-  -webkit-backdrop-filter: blur(10px) saturate(1.3);
   transform: translateZ(0);
 }
 .row-dot:active { transform: scale(1.06, 0.9); border-radius: 999px; }
@@ -392,8 +407,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
   border-radius: 20px; padding: 14px 16px; margin-bottom: 10px;
   color: var(--ink);
   box-shadow: 0 6px 20px rgba(124, 92, 255, 0.10), 0 2px 8px rgba(20, 24, 31, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(12px) saturate(1.3);
-  -webkit-backdrop-filter: blur(12px) saturate(1.3);
   transition: var(--morph);
   transform: translateZ(0);
   position: relative; overflow: hidden;
@@ -451,8 +464,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
   border-radius: var(--radius-sm);
   padding: 14px;
   margin-bottom: 10px;
-  backdrop-filter: blur(12px) saturate(1.3);
-  -webkit-backdrop-filter: blur(12px) saturate(1.3);
   box-shadow: 0 6px 20px rgba(20, 24, 31, 0.06), var(--glow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.7);
   transition: var(--morph);
   transform: translateZ(0);
@@ -619,6 +630,7 @@ p { margin: 0 0 12px; line-height: 1.55; }
   gap: 8px;
   padding: 10px 2px;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 .msg {
   max-width: 78%;
@@ -636,8 +648,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
 .msg-mine {
   align-self: flex-end;
   background: linear-gradient(135deg, rgba(139, 92, 246, 0.88), rgba(59, 130, 246, 0.82) 60%, rgba(20, 184, 166, 0.78));
-  backdrop-filter: blur(12px) saturate(1.4);
-  -webkit-backdrop-filter: blur(12px) saturate(1.4);
   border: 1px solid rgba(255, 255, 255, 0.5);
   box-shadow: 0 6px 18px rgba(139, 92, 246, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.45);
   color: #fff;
@@ -646,8 +656,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
 .msg-theirs {
   align-self: flex-start;
   background: var(--surface-glass);
-  backdrop-filter: blur(12px) saturate(1.3);
-  -webkit-backdrop-filter: blur(12px) saturate(1.3);
   border: 1px solid var(--glass-hi);
   box-shadow: 0 4px 16px rgba(20, 24, 31, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.7);
   border-bottom-left-radius: 6px;
@@ -784,13 +792,12 @@ p { margin: 0 0 12px; line-height: 1.55; }
 .take-palette-grid {
   display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
   margin-top: 12px; max-height: 46vh; overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .take-palette-num {
   min-height: 48px; padding: 0; border-radius: 14px;
   border: 1px solid var(--glass-hi); background: var(--surface-glass);
   color: var(--ink); font-weight: 700; font-size: 16px;
-  backdrop-filter: blur(10px) saturate(1.3);
-  -webkit-backdrop-filter: blur(10px) saturate(1.3);
   box-shadow: 0 3px 10px rgba(20, 24, 31, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.7);
   transition: var(--morph);
   transform: translateZ(0);
@@ -855,8 +862,6 @@ p { margin: 0 0 12px; line-height: 1.55; }
 .take-review-item {
   border: 1px solid var(--glass-hi); background: var(--surface-glass);
   border-radius: 14px; padding: 14px; margin-bottom: 10px;
-  backdrop-filter: blur(10px) saturate(1.3);
-  -webkit-backdrop-filter: blur(10px) saturate(1.3);
   box-shadow: 0 4px 16px rgba(20, 24, 31, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.7);
   transition: var(--morph);
   transform: translateZ(0);
@@ -916,7 +921,7 @@ p { margin: 0 0 12px; line-height: 1.55; }
 .viewer-screen::before { content: ""; position: fixed; inset: -5%; z-index: -1; pointer-events: none; background-image: var(--aurora); background-size: 100% 100%; }
 .viewer-bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
 .viewer-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
-.viewer-canvas-wrap { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: center; padding: 0 8px 8px; }
+.viewer-canvas-wrap { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: center; padding: 0 8px 8px; overscroll-behavior: contain; }
 .viewer-canvas-wrap canvas { max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 8px 28px rgba(20, 24, 31, 0.18); background: #fff; }
 .viewer-canvas-wrap img { max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 8px 28px rgba(20, 24, 31, 0.18); background: #fff; }
 .viewer-nav { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
