@@ -1,18 +1,29 @@
-// MS Study API — Supabase Edge Function (Deno).
+// MS Study API — Supabase Edge Function (Deno). NO-PASSWORD MODEL.
 //
 // Single-router replacement for the old Express server (server.mjs).
 // Base URL: https://<project-ref>.supabase.co/functions/v1/ms-api
-// JWT verification must be OFF for this function (the app authenticates
-// with the password in the request body, exactly like the Express server).
+// JWT verification must be OFF for this function.
 //
-// Routes (same paths, codes and JSON shapes as server.mjs):
+// Identity is deviceId ONLY. There are no passwords, no login, no
+// revalidation, no device binding and no "kicked" logic anywhere in
+// this file: every endpoint that needs an identity takes { deviceId }
+// in the request body and trusts it. A missing deviceId is rejected
+// (400 / { result: "incorrect" }); a deviceId alone is enough.
+// The old ms_passwords table is left untouched as dead data — nothing
+// in this file reads it, hashes anything into it, or validates
+// against it. The /admin/* password endpoints are disabled and answer
+// HTTP 410 Gone with { result: "gone" }.
+//
+// Completions ("Mark as Complete" ticks) are keyed by device_id
+// (ms_completions.device_id), NOT by any password hash.
+//
+// Routes:
 //   GET  /health
-//   POST /validate
-//   POST /admin/create-password
-//   POST /admin/passwords
-//   POST /admin/deactivate
-//   POST /drive/list
-//   POST /drive/upload   (multipart, file field "file")
+//   POST /validate       (deviceId-only: any deviceId is valid)
+//   POST /admin/*        (DISABLED — 410 Gone)
+//   POST /drive/list     (deviceId only)
+//   POST /drive/file     (deviceId only, PDF proxy)
+//   POST /drive/upload   (multipart, file field "file"; deviceId only)
 //   POST /chat/join      (accepts optional pushToken: FCM device token)
 //   POST /chat/send      (sends a generic FCM push to the other member)
 //   POST /chat/messages
@@ -20,13 +31,10 @@
 //   POST /chat/change-code
 //   POST /chat/push-token (register / refresh this device's FCM token)
 //
-// Rules (same as server.mjs):
-// - Passwords are SHA-256 hashes (unsalted).
-// - No password expiry, ever.
-// - One password = one device. Last login wins: a "login" rebinds the
-//   password to the new device (old device becomes kicked); a
-//   "revalidate" never rebinds. A kicked device can log back in by
-//   re-entering the password, which kicks the other device.
+// Rules:
+// - No passwords, no expiry, no binding, no kicked devices.
+// - Attempts/results stay per-device (keyed by device_id in
+//   ms_attempts); tests themselves are visible to every device.
 // - Drive calls use OAuth user credentials (refresh token for the owner's
 //   Google account) + the Drive REST API directly — no googleapis dep.
 //   A service account CANNOT upload (it has no storage quota), so the
@@ -104,135 +112,6 @@ async function sha256Hex(text: string): Promise<string> {
   return [...new Uint8Array(digest)]
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-}
-
-const hashPassword = (password: string) => sha256Hex(password);
-
-// Look up an ACTIVE password row by its SHA-256 hash. Returns the row or null.
-async function findActivePasswordRow(password: string) {
-  const { data, error } = await supabaseAdmin
-    .from("ms_passwords")
-    .select(
-      "id, password_hash, role, active, device_id, device_label, created_at, last_used_at, kicked_device_id",
-    )
-    .eq("password_hash", await hashPassword(password))
-    .eq("active", true)
-    .maybeSingle();
-  if (error) throw error;
-  return data ?? null;
-}
-
-// Validate a password + device. mode is "login" (explicit password entry,
-// may rebind — last login wins) or "revalidate" (background check, never
-// rebinds). See server.mjs for the full rule table.
-async function validateWithRebind(
-  password: string,
-  deviceId: string,
-  deviceLabel: string | null | undefined,
-  mode: string,
-) {
-  const row = await findActivePasswordRow(password);
-  if (!row) return { result: "incorrect" };
-  if (mode === "revalidate") {
-    if (deviceId && row.device_id && row.device_id === deviceId) {
-      const { error } = await supabaseAdmin
-        .from("ms_passwords")
-        .update({ last_used_at: nowIso() })
-        .eq("id", row.id);
-      if (error) throw error;
-      return { result: "valid", role: row.role };
-    }
-    return { result: "kicked" };
-  }
-  if (deviceId && row.device_id && row.device_id !== deviceId) {
-    const { error } = await supabaseAdmin
-      .from("ms_passwords")
-      .update({
-        kicked_device_id: row.device_id,
-        device_id: deviceId,
-        device_label: deviceLabel ?? row.device_label ?? null,
-        last_used_at: nowIso(),
-      })
-      .eq("id", row.id);
-    if (error) throw error;
-    return { result: "valid", role: row.role };
-  }
-  const { error } = await supabaseAdmin
-    .from("ms_passwords")
-    .update({
-      device_id: deviceId ? deviceId : row.device_id,
-      device_label: deviceLabel ?? row.device_label ?? null,
-      last_used_at: nowIso(),
-    })
-    .eq("id", row.id);
-  if (error) throw error;
-  return { result: "valid", role: row.role };
-}
-
-// Validate a password + device WITHOUT rebinding (used by /drive/list and
-// /drive/upload): a device bound to someone else is "kicked", not rebound.
-async function validateNoRebind(
-  password: string,
-  deviceId: string,
-  deviceLabel?: string | null,
-) {
-  const row = await findActivePasswordRow(password);
-  if (!row) return { result: "incorrect" };
-  if (deviceId && row.device_id && row.device_id !== deviceId) {
-    return { result: "kicked" };
-  }
-  const { error } = await supabaseAdmin
-    .from("ms_passwords")
-    .update({
-      device_id: deviceId ? deviceId : row.device_id,
-      device_label: deviceLabel ?? row.device_label ?? null,
-      last_used_at: nowIso(),
-    })
-    .eq("id", row.id);
-  if (error) throw error;
-  return { result: "valid", role: row.role };
-}
-
-// Verify an admin password. Returns { row } on success, or
-// { result: "unauthorized" } on any failure.
-async function verifyAdmin(adminPassword: unknown, deviceId?: unknown) {
-  if (typeof adminPassword !== "string" || !adminPassword) {
-    return { result: "unauthorized" };
-  }
-  let row;
-  try {
-    row = await findActivePasswordRow(adminPassword);
-  } catch {
-    return { result: "unauthorized" };
-  }
-  if (!row || row.role !== "admin") return { result: "unauthorized" };
-  if (deviceId && row.device_id && row.device_id !== deviceId) {
-    return { result: "unauthorized" };
-  }
-  try {
-    await supabaseAdmin
-      .from("ms_passwords")
-      .update({
-        device_id: deviceId ? deviceId : row.device_id,
-        last_used_at: nowIso(),
-      })
-      .eq("id", row.id);
-  } catch {
-    // Binding bookkeeping must not block an otherwise valid admin check.
-  }
-  return { row };
-}
-
-// Readable user code: "MS-XXXXX", 5 chars from A-Z + 2-9 (no 0/O/1/I).
-const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-function generateUserCode(): string {
-  // 256 is divisible by 32, so byte % 32 is perfectly uniform here.
-  const bytes = crypto.getRandomValues(new Uint8Array(5));
-  let code = "MS-";
-  for (let i = 0; i < 5; i += 1) {
-    code += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
-  }
-  return code;
 }
 
 const directLink = (fileId: string) =>
@@ -384,140 +263,15 @@ async function readJsonBody(req: Request): Promise<Record<string, unknown> | nul
 // Routes
 // ---------------------------------------------------------------------------
 
+// No-password model: /validate takes { deviceId } only. Any
+// non-empty deviceId is valid — there is nothing to check against.
+// Kept so old app builds that still call /validate keep working.
 async function handleValidate(body: Record<string, unknown>) {
-  const password = body.password;
   const deviceId = body.deviceId;
-  const deviceLabel = body.deviceLabel;
-  const mode = body.mode;
-  if (
-    typeof password !== "string" || !password ||
-    typeof deviceId !== "string" || !deviceId
-  ) {
+  if (typeof deviceId !== "string" || !deviceId) {
     return jsonResponse({ result: "incorrect" }, 400);
   }
-  const validateMode = mode === "revalidate" ? "revalidate" : "login";
-  try {
-    const outcome = await validateWithRebind(
-      password,
-      deviceId,
-      typeof deviceLabel === "string" ? deviceLabel : null,
-      validateMode,
-    );
-    return jsonResponse(outcome, 200);
-  } catch (error) {
-    console.error("Password validation failed", { message: (error as Error).message });
-    return jsonResponse({ result: "unavailable" }, 503);
-  }
-}
-
-async function handleAdminCreatePassword(body: Record<string, unknown>) {
-  const admin = await verifyAdmin(body.adminPassword, body.deviceId);
-  if (!admin.row) return jsonResponse({ result: "unauthorized" }, 401);
-  // FIX 9 (v1.0.12): the admin may TYPE her own password for a new user.
-  // Custom passwords must be 4-32 chars of letters/digits/hyphen/underscore
-  // and must not already be in use. Empty/missing keeps the random code.
-  const custom = typeof body.password === "string" ? body.password.trim() : "";
-  let code: string | null = null;
-  if (custom) {
-    if (custom.length < 4 || custom.length > 32 || !/^[A-Za-z0-9_-]+$/.test(custom)) {
-      return jsonResponse({ result: "unavailable" }, 400);
-    }
-    const { data: existing } = await supabaseAdmin
-      .from("ms_passwords")
-      .select("id")
-      .eq("password_hash", await hashPassword(custom))
-      .maybeSingle();
-    if (existing) return jsonResponse({ result: "unavailable" }, 409);
-    code = custom;
-  } else {
-    for (let attempt = 0; attempt < 5 && !code; attempt += 1) {
-      const candidate = generateUserCode();
-      const { data } = await supabaseAdmin
-        .from("ms_passwords")
-        .select("id")
-        .eq("password_hash", await hashPassword(candidate))
-        .maybeSingle();
-      if (!data) code = candidate;
-    }
-  }
-  if (!code) return jsonResponse({ result: "unavailable" }, 500);
-  const { error } = await supabaseAdmin.from("ms_passwords").insert({
-    password_hash: await hashPassword(code),
-    role: "user",
-    active: true,
-    device_id: null,
-    device_label: null,
-  });
-  if (error) {
-    console.error("Password creation failed", { message: error.message });
-    return jsonResponse({ result: "unavailable" }, 500);
-  }
-  return jsonResponse({ result: "ok", password: code }, 201);
-}
-
-// FIX 9 (v1.0.12): real delete of a user password (not just deactivation).
-// The user can no longer log in, and their next revalidation logs them out.
-async function handleAdminDeletePassword(body: Record<string, unknown>) {
-  const admin = await verifyAdmin(body.adminPassword, body.deviceId);
-  if (!admin.row) return jsonResponse({ result: "unauthorized" }, 401);
-  const id = body.id;
-  if (typeof id !== "string" || !id) {
-    return jsonResponse({ result: "not-found" }, 400);
-  }
-  // The admin password can never be deleted from the app — deleting it
-  // locks everyone out (2026-11-24: Kiara deleted it by mistake).
-  const { data, error } = await supabaseAdmin
-    .from("ms_passwords")
-    .delete()
-    .eq("id", id)
-    .neq("role", "admin")
-    .select("id")
-    .maybeSingle();
-  if (error) {
-    console.error("Password delete failed", { message: error.message });
-    return jsonResponse({ result: "unavailable" }, 500);
-  }
-  if (!data) return jsonResponse({ result: "not-found" }, 404);
-  return jsonResponse({ result: "ok" }, 200);
-}
-
-async function handleAdminPasswords(body: Record<string, unknown>) {
-  const admin = await verifyAdmin(body.adminPassword);
-  if (!admin.row) return jsonResponse({ result: "unauthorized" }, 401);
-  const { data, error } = await supabaseAdmin
-    .from("ms_passwords")
-    .select("id, role, device_id, device_label, active, created_at, last_used_at")
-    .eq("role", "user")
-    .order("created_at", { ascending: false });
-  if (error) {
-    console.error("Password list failed", { message: error.message });
-    return jsonResponse({ result: "unavailable" }, 500);
-  }
-  return jsonResponse({ result: "ok", passwords: data ?? [] }, 200);
-}
-
-async function handleAdminDeactivate(body: Record<string, unknown>) {
-  const admin = await verifyAdmin(body.adminPassword);
-  if (!admin.row) return jsonResponse({ result: "unauthorized" }, 401);
-  const id = body.id;
-  if (typeof id !== "string" || !id) {
-    return jsonResponse({ result: "not-found" }, 400);
-  }
-  // The admin password can never be deactivated from the app either —
-  // deactivating it locks everyone out just like deleting it.
-  const { data, error } = await supabaseAdmin
-    .from("ms_passwords")
-    .update({ active: false })
-    .eq("id", id)
-    .neq("role", "admin")
-    .select("id")
-    .maybeSingle();
-  if (error) {
-    console.error("Password deactivate failed", { message: error.message });
-    return jsonResponse({ result: "unavailable" }, 500);
-  }
-  if (!data) return jsonResponse({ result: "not-found" }, 404);
-  return jsonResponse({ result: "ok" }, 200);
+  return jsonResponse({ result: "valid" }, 200);
 }
 
 // FIX 7 (v1.0.12): in-app PDF viewer proxy. The app's PDF.js fetches the
@@ -526,7 +280,7 @@ async function handleAdminDeactivate(body: Record<string, unknown>) {
 // its OAuth token to fetch the bytes and streams them back with
 // Access-Control-Allow-Origin: *, so PDF.js can render them in-app.
 async function handleDriveFile(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -563,23 +317,11 @@ async function handleDriveFile(body: Record<string, unknown>) {
 }
 
 async function handleDriveList(body: Record<string, unknown>) {
-  const password = body.password;
+  // No-password model: deviceId only, no password check.
   const deviceId = body.deviceId;
   const folderId = body.folderId;
-  if (
-    typeof password !== "string" || !password ||
-    typeof deviceId !== "string" || !deviceId
-  ) {
+  if (typeof deviceId !== "string" || !deviceId) {
     return jsonResponse({ result: "incorrect" }, 400);
-  }
-  try {
-    const outcome = await validateNoRebind(password, deviceId);
-    if (outcome.result !== "valid") {
-      return jsonResponse({ result: outcome.result }, 200);
-    }
-  } catch (error) {
-    console.error("Drive list validation failed", { message: (error as Error).message });
-    return jsonResponse({ result: "unavailable" }, 503);
   }
   if (!driveConfigured()) {
     return jsonResponse({ result: "drive-not-configured" }, 200);
@@ -599,6 +341,9 @@ async function handleDriveList(body: Record<string, unknown>) {
 }
 
 async function handleDriveUpload(req: Request) {
+  // No-password model: deviceId only. The old admin-password gate is
+  // gone — any device may upload (same trust model as the rest of the
+  // no-password server; only the user's own devices call this API).
   let form: FormData;
   try {
     form = await req.formData();
@@ -609,31 +354,13 @@ async function handleDriveUpload(req: Request) {
     const v = form.get(key);
     return typeof v === "string" ? v : null;
   };
-  const password = getStr("password");
   const deviceId = getStr("deviceId");
   const title = getStr("title");
   const kind = getStr("kind");
   const folderId = getStr("folderId");
   const sectionId = getStr("sectionId");
-  if (typeof password !== "string" || !password) {
+  if (typeof deviceId !== "string" || !deviceId) {
     return jsonResponse({ result: "incorrect" }, 400);
-  }
-  let role: string;
-  try {
-    const outcome = await validateNoRebind(password, deviceId ?? "");
-    if (outcome.result === "incorrect") {
-      return jsonResponse({ result: "incorrect" }, 200);
-    }
-    if (outcome.result === "kicked") {
-      return jsonResponse({ result: "kicked" }, 200);
-    }
-    role = outcome.role;
-  } catch (error) {
-    console.error("Drive upload validation failed", { message: (error as Error).message });
-    return jsonResponse({ result: "unavailable" }, 503);
-  }
-  if (role !== "admin") {
-    return jsonResponse({ result: "unauthorized" }, 401);
   }
   if (!driveConfigured()) {
     return jsonResponse({ result: "drive-not-configured" }, 200);
@@ -698,29 +425,17 @@ async function handleDriveUpload(req: Request) {
 // Folders / sections / items (Phase 2)
 // ---------------------------------------------------------------------------
 
-type Authed = { ok: true; role: string } | { ok: false; result: string };
+type Authed = { ok: true; deviceId: string } | { ok: false; result: string };
 
-async function requireValidUser(
-  body: Record<string, unknown>,
-): Promise<Authed> {
-  const password = body.password;
+// No-password model: the ONLY identity check in the server. A request
+// is authorised iff it carries a non-empty deviceId. No password is
+// read, hashed or looked up anywhere. (Replaces requireValidUser.)
+function requireDevice(body: Record<string, unknown>): Authed {
   const deviceId = body.deviceId;
-  if (
-    typeof password !== "string" || !password ||
-    typeof deviceId !== "string" || !deviceId
-  ) {
+  if (typeof deviceId !== "string" || !deviceId) {
     return { ok: false, result: "incorrect" };
   }
-  try {
-    const outcome = await validateNoRebind(password, deviceId);
-    if (outcome.result !== "valid") {
-      return { ok: false, result: outcome.result };
-    }
-    return { ok: true, role: outcome.role };
-  } catch (error) {
-    console.error("Auth check failed", { message: (error as Error).message });
-    return { ok: false, result: "unavailable" };
-  }
+  return { ok: true, deviceId };
 }
 
 function cleanId(v: unknown): string | null {
@@ -728,7 +443,7 @@ function cleanId(v: unknown): string | null {
 }
 
 async function handleFoldersList(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -752,8 +467,8 @@ async function handleFoldersList(body: Record<string, unknown>) {
 }
 
 async function handleFoldersCreate(body: Record<string, unknown>) {
-  const admin = await verifyAdmin(body.adminPassword ?? body.password, body.deviceId);
-  if (!admin.row) return jsonResponse({ result: "unauthorized" }, 401);
+  const auth = requireDevice(body);
+  if (!auth.ok) return jsonResponse({ result: auth.result }, 200);
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return jsonResponse({ result: "unavailable" }, 400);
   const parentId = cleanId(body.parentId);
@@ -771,8 +486,8 @@ async function handleFoldersCreate(body: Record<string, unknown>) {
 }
 
 async function handleFoldersDelete(body: Record<string, unknown>) {
-  const admin = await verifyAdmin(body.adminPassword ?? body.password, body.deviceId);
-  if (!admin.row) return jsonResponse({ result: "unauthorized" }, 401);
+  const auth = requireDevice(body);
+  if (!auth.ok) return jsonResponse({ result: auth.result }, 200);
   const folderId = cleanId(body.folderId);
   if (!folderId) return jsonResponse({ result: "unavailable" }, 400);
   try {
@@ -818,7 +533,7 @@ async function handleFoldersDelete(body: Record<string, unknown>) {
 }
 
 async function handleSectionsList(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -865,8 +580,8 @@ async function handleSectionsList(body: Record<string, unknown>) {
 }
 
 async function handleSectionsCreate(body: Record<string, unknown>) {
-  const admin = await verifyAdmin(body.adminPassword ?? body.password, body.deviceId);
-  if (!admin.row) return jsonResponse({ result: "unauthorized" }, 401);
+  const auth = requireDevice(body);
+  if (!auth.ok) return jsonResponse({ result: auth.result }, 200);
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const folderId = cleanId(body.folderId);
   if (!name || !folderId) return jsonResponse({ result: "unavailable" }, 400);
@@ -883,8 +598,8 @@ async function handleSectionsCreate(body: Record<string, unknown>) {
 }
 
 async function handleSectionsDelete(body: Record<string, unknown>) {
-  const admin = await verifyAdmin(body.adminPassword ?? body.password, body.deviceId);
-  if (!admin.row) return jsonResponse({ result: "unauthorized" }, 401);
+  const auth = requireDevice(body);
+  if (!auth.ok) return jsonResponse({ result: auth.result }, 200);
   const sectionId = cleanId(body.sectionId);
   if (!sectionId) return jsonResponse({ result: "unavailable" }, 400);
   try {
@@ -900,7 +615,7 @@ async function handleSectionsDelete(body: Record<string, unknown>) {
 }
 
 async function handleItemsList(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -926,25 +641,22 @@ async function handleItemsList(body: Record<string, unknown>) {
 }
 
 // ---------------------------------------------------------------------------
-// Mark as Complete (v1.0.14, user order 2026-11-25)
-// Every folder / section / note / practice sheet can be marked complete
-// (green tick). The completion is keyed by the PASSWORD HASH — not the
-// device — so it survives logout/login AND logging in on another phone
-// with the same password. (One password = one user; the hash is the
-// per-password identity. The app always sends the password, so the
-// server can derive the hash without storing anything new.)
+// Mark as Complete (v1.0.14, user order 2026-11-25; NO-PASSWORD rework)
+// Every folder / section / note / practice sheet — and every test and
+// practice-set card (item_type "test" / "practice") — can be marked
+// complete (green tick). The completion is keyed by device_id — NOT by any
+// password hash. (The old password_hash column stays in the table as
+// dead data; see migrations/no-password-completions.sql, which backfills
+// device_id from ms_passwords and drops orphan rows.)
 async function handleCompleteList(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
-    return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
+    return jsonResponse({ result: auth.result }, 200);
   }
-  const password = body.password;
-  if (typeof password !== "string" || !password) return jsonResponse({ result: "incorrect" }, 200);
-  const ph = await hashPassword(password);
   const { data, error } = await supabaseAdmin
     .from("ms_completions")
     .select("item_type, item_id")
-    .eq("password_hash", ph);
+    .eq("device_id", auth.deviceId);
   if (error) {
     console.error("Complete list failed", { message: error.message });
     return jsonResponse({ result: "unavailable" }, 500);
@@ -953,25 +665,24 @@ async function handleCompleteList(body: Record<string, unknown>) {
 }
 
 async function handleCompleteMark(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
-    return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
+    return jsonResponse({ result: auth.result }, 200);
   }
-  const password = body.password;
   const itemType = cleanId(body.itemType);
   const itemId = cleanId(body.itemId);
   if (
-    typeof password !== "string" || !password || !itemType || !itemId ||
-    (itemType !== "folder" && itemType !== "section" && itemType !== "item")
+    !itemType || !itemId ||
+    (itemType !== "folder" && itemType !== "section" && itemType !== "item" &&
+      itemType !== "test" && itemType !== "practice")
   ) {
     return jsonResponse({ result: "unavailable" }, 400);
   }
-  const ph = await hashPassword(password);
   const { error } = await supabaseAdmin
     .from("ms_completions")
     .upsert(
-      { password_hash: ph, item_type: itemType, item_id: itemId },
-      { onConflict: "password_hash,item_type,item_id" },
+      { device_id: auth.deviceId, item_type: itemType, item_id: itemId },
+      { onConflict: "device_id,item_type,item_id" },
     );
   if (error) {
     console.error("Complete mark failed", { message: error.message });
@@ -981,24 +692,23 @@ async function handleCompleteMark(body: Record<string, unknown>) {
 }
 
 async function handleCompleteUnmark(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
-    return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
+    return jsonResponse({ result: auth.result }, 200);
   }
-  const password = body.password;
   const itemType = cleanId(body.itemType);
   const itemId = cleanId(body.itemId);
   if (
-    typeof password !== "string" || !password || !itemType || !itemId ||
-    (itemType !== "folder" && itemType !== "section" && itemType !== "item")
+    !itemType || !itemId ||
+    (itemType !== "folder" && itemType !== "section" && itemType !== "item" &&
+      itemType !== "test" && itemType !== "practice")
   ) {
     return jsonResponse({ result: "unavailable" }, 400);
   }
-  const ph = await hashPassword(password);
   const { error } = await supabaseAdmin
     .from("ms_completions")
     .delete()
-    .eq("password_hash", ph)
+    .eq("device_id", auth.deviceId)
     .eq("item_type", itemType)
     .eq("item_id", itemId);
   if (error) {
@@ -1009,7 +719,7 @@ async function handleCompleteUnmark(body: Record<string, unknown>) {
 }
 
 async function handleTestsList(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -1019,20 +729,32 @@ async function handleTestsList(body: Record<string, unknown>) {
   // (keyed by device_id in ms_attempts); only the tests themselves are
   // shared. created_by is still stored (who uploaded it) but no longer
   // filters anything.
-  const { data, error } = await supabaseAdmin
-    .from("ms_tests")
-    .select("id, title, kind, language, question_count, duration_min, exam, category, chapter, total_marks, created_at, created_by")
-    .eq("kind", typeof body.kind === "string" && body.kind ? body.kind : "notes")
-    .order("created_at", { ascending: false });
-  if (error) {
-    console.error("Tests list failed", { message: error.message });
-    return jsonResponse({ result: "unavailable" }, 500);
+  // v1.0.23 FIX (2026-11-27, her order: chapter subjects went missing):
+  // PostgREST caps one select at 1000 rows. Once the DB passed 1000
+  // tests (1724 now), this newest-first window dropped the OLDEST chapter
+  // tests from the app. Page through ALL rows and return the full list.
+  const kind = typeof body.kind === "string" && body.kind ? body.kind : "notes";
+  const PAGE = 1000;
+  const tests: unknown[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error: pageErr } = await supabaseAdmin
+      .from("ms_tests")
+      .select("id, title, kind, language, question_count, duration_min, exam, category, chapter, total_marks, created_at, created_by")
+      .eq("kind", kind)
+      .order("created_at", { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (pageErr) {
+      console.error("Tests list failed", { message: pageErr.message });
+      return jsonResponse({ result: "unavailable" }, 500);
+    }
+    tests.push(...(page ?? []));
+    if (!page || page.length < PAGE) break;
   }
-  return jsonResponse({ result: "ok", tests: data ?? [] }, 200);
+  return jsonResponse({ result: "ok", tests }, 200);
 }
 
 async function handleTestsQuestions(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -1068,7 +790,7 @@ async function handleTestsQuestions(body: Record<string, unknown>) {
 }
 
 async function handleTestsSubmit(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -1109,12 +831,12 @@ async function handleTestsSubmit(body: Record<string, unknown>) {
 }
 
 // Latest attempt of one test for the CALLER only. The caller's deviceId
-// comes from the authenticated body (requireValidUser already checked it),
-// so a user can never see another user's attempt: one password = one
-// device, and device_id is the per-user key. Returns attempt: null when
+// comes from the authenticated body (requireDevice already checked it),
+// so a user can never see another user's attempt: device_id is the
+// per-user key. Returns attempt: null when
 // the user has never taken this test.
 async function handleTestsLastAttempt(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -1283,8 +1005,8 @@ async function groqGenerate(prompt: string): Promise<string> {
 }
 
 async function handleTestsGenerate(body: Record<string, unknown>) {
-  // AI test creation is open to EVERY logged-in user (v1.0.12), not admin-only.
-  const auth = await requireValidUser(body);
+  // AI test creation is open to EVERY device (v1.0.12), not admin-only.
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -1456,7 +1178,7 @@ async function handleTestsGenerate(body: Record<string, unknown>) {
 // ---------------------------------------------------------------------------
 // Hidden chat (Phase 5) — 1:1 chat, pairing by code, max 2 per code.
 // Room id = "ms_hidden_" + SHA-256(code). Members are deviceIds.
-// Auth: the study password (any valid user) + deviceId, same as folders.
+// Auth: deviceId only, same as folders.
 // ---------------------------------------------------------------------------
 
 const CHAT_MAX_MEMBERS = 2;
@@ -1649,7 +1371,7 @@ async function sendChatPush(roomId: string, senderDeviceId: string): Promise<voi
 }
 
 async function handleChatJoin(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -1697,7 +1419,7 @@ async function handleChatJoin(body: Record<string, unknown>) {
 }
 
 async function handleChatSend(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -1737,7 +1459,7 @@ async function handleChatSend(body: Record<string, unknown>) {
 // calls this whenever its token arrives or rotates, and /chat/join
 // also accepts the token directly — either path stores the same row.
 async function handleChatPushToken(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -1757,7 +1479,7 @@ async function handleChatPushToken(body: Record<string, unknown>) {
 // FIX 6 (v1.0.12): mark the chat as read — updates the caller's
 // ms_chat_presence.last_read_at so the other side sees double ticks.
 async function handleChatMarkRead(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -1782,7 +1504,7 @@ async function handleChatMarkRead(body: Record<string, unknown>) {
 }
 
 async function handleChatMessages(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -1817,7 +1539,7 @@ async function handleChatMessages(body: Record<string, unknown>) {
 }
 
 async function handleChatDelete(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -1844,7 +1566,7 @@ async function handleChatDelete(body: Record<string, unknown>) {
 }
 
 async function handleChatChangeCode(body: Record<string, unknown>) {
-  const auth = await requireValidUser(body);
+  const auth = requireDevice(body);
   if (!auth.ok) {
     return jsonResponse({ result: auth.result }, auth.result === "unavailable" ? 503 : 200);
   }
@@ -1895,24 +1617,20 @@ Deno.serve(async (req: Request) => {
       return await handleValidate(body);
     }
     if (req.method === "POST" && path === "/admin/create-password") {
-      const body = await readJsonBody(req);
-      if (body === null) return jsonResponse({ result: "unavailable" }, 500);
-      return await handleAdminCreatePassword(body);
+      // No-password model: this admin endpoint is gone.
+      return jsonResponse({ result: "gone" }, 410);
     }
     if (req.method === "POST" && path === "/admin/passwords") {
-      const body = await readJsonBody(req);
-      if (body === null) return jsonResponse({ result: "unavailable" }, 500);
-      return await handleAdminPasswords(body);
+      // No-password model: this admin endpoint is gone.
+      return jsonResponse({ result: "gone" }, 410);
     }
     if (req.method === "POST" && path === "/admin/deactivate") {
-      const body = await readJsonBody(req);
-      if (body === null) return jsonResponse({ result: "unavailable" }, 500);
-      return await handleAdminDeactivate(body);
+      // No-password model: this admin endpoint is gone.
+      return jsonResponse({ result: "gone" }, 410);
     }
     if (req.method === "POST" && path === "/admin/delete-password") {
-      const body = await readJsonBody(req);
-      if (body === null) return jsonResponse({ result: "unavailable" }, 500);
-      return await handleAdminDeletePassword(body);
+      // No-password model: this admin endpoint is gone.
+      return jsonResponse({ result: "gone" }, 410);
     }
     if (req.method === "POST" && path === "/folders/list") {
       const body = await readJsonBody(req);

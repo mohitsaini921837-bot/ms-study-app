@@ -1,6 +1,8 @@
 package com.kiara.msstudy;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Build;
 
 import com.getcapacitor.JSObject;
@@ -9,61 +11,100 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-import org.json.JSONObject;
-
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
- * Capacitor bridge for the MS Study access-password system (Phase 1).
+ * Capacitor bridge for MS Study (no-password build, v1.0.23).
  *
- * Mirrors the PW app's PwAccessPlugin (pw-apk/.../PwAccessPlugin.java) in
- * structure: background-thread POST, serialized on VALIDATE_LOCK so the
- * 15s silent revalidation can never pile up while the free Render
- * service cold-starts (~30-60s), and the same result vocabulary.
+ * There is no login, no access password, and no role anywhere: the
+ * device id IS the identity — a UUID generated once and stored
+ * AES-encrypted in MsSessionStore — and the server accepts
+ * deviceId-only calls. The old password machinery (validate /
+ * revalidate / revalidateSaved / VALIDATE_URL) was removed with the
+ * login system; nothing in JS calls it anymore.
  *
- * Server contract:
- *   POST https://ms-study-server.onrender.com/validate
- *   {password, deviceId, deviceLabel} ->
- *     {result: "valid", role: "admin"|"user"}
- *     {result: "incorrect"} | {result: "kicked"} |
- *     {result: "unavailable"} | {result: "rate_limited"}
+ * This plugin now exposes only two things:
+ *   - device identity: getDeviceInfo / getDeviceId
+ *   - hidden-chat code storage: getChatCode / setChatCode /
+ *     clearChatCode (the chat code is separate from login and is
+ *     untouched by the no-password change)
  *
- * Differences from PW (deliberate, per the MS Study spec):
- *   - NO expiry anywhere: no expiresAt, no validity countdown, no pill.
- *     A valid password stays valid until the server says otherwise.
- *   - The password is NEVER stored natively. MsSessionStore holds only
- *     {deviceId, role}. The JS side keeps the password in memory only
- *     and passes it to revalidate() on every 15s/resume check — that is
- *     why revalidate() takes a password parameter, unlike PW's
- *     revalidateSaved() which reads a stored password.
- *   - Device identity is the encrypted UUID from MsSessionStore, not
- *     the Android ID. deviceLabel is "Android <model>".
+ * Device identity is the encrypted UUID from MsSessionStore, not
+ * the Android ID. deviceLabel is "Android <model>".
+ *
+ * WEB-BUNDLE AUTO-UPDATE (v1.0.23, silent, web-only):
+ * installWebBundle() verifies a downloaded www ZIP (SHA-256), extracts
+ * it to internal storage, validates the required files, and ONLY then
+ * persists the path in the SAME SharedPreferences the Capacitor Bridge
+ * reads on every launch ("CapWebViewSettings" / "serverBasePath",
+ * Bridge.java:278-285 — if the path exists, the WebView's local server
+ * serves the downloaded bundle instead of the APK's bundled www from
+ * the NEXT cold launch; WebViewLocalServer.hostFiles() serves it on the
+ * same https://localhost origin). On ANY failure the stored path is
+ * untouched, so the app keeps running its current bundle — a bad bundle
+ * can never brick the app. When a new APK is installed, the Bridge's
+ * isNewBinary() (Bridge.java:414-441) clears the stored path itself, so
+ * a new APK always starts from its own bundled www.
  */
 @CapacitorPlugin(name = "MsAccess")
 public class MsAccessPlugin extends Plugin {
 
-    // PLANNED Render URL — must match SERVER_URL in www/app.js. Update
-    // both together once the real Render service is live.
-    public static final String VALIDATE_URL = "https://ms-study-server.onrender.com/validate";
+    /** Same keys the Capacitor Bridge uses (com.getcapacitor.plugin.WebView). */
+    private static final String WEBVIEW_PREFS_NAME = "CapWebViewSettings";
+    private static final String CAP_SERVER_PATH = "serverBasePath";
+    /** Installed www build, mirrored in JS localStorage (ms_www_build). */
+    private static final String WWW_BUILD_KEY = "msWwwBuild";
+    private static final String WWW_DIR_NAME = "www-bundle";
+    /** Files a bundle must contain to be accepted as a runnable www. */
+    private static final String[] REQUIRED_WWW_FILES = {
+        "index.html", "app.js", "styles.css", "drive.js"
+    };
 
-    private static final Object VALIDATE_LOCK = new Object();
-
-    public static final class Validation {
-        public final String result;
-        public final String role; // "admin" | "user", may be null
-        public final String message; // may be null
-
-        public Validation(String result, String role, String message) {
-            this.result = result;
-            this.role = role;
-            this.message = message;
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
         }
+        return sb.toString();
+    }
+
+    private static String sha256Hex(File file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        InputStream in = new BufferedInputStream(new FileInputStream(file));
+        try {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                digest.update(buf, 0, n);
+            }
+        } finally {
+            in.close();
+        }
+        return bytesToHex(digest.digest());
+    }
+
+    private static void deleteRecursive(File f) {
+        if (f == null || !f.exists()) {
+            return;
+        }
+        if (f.isDirectory()) {
+            File[] children = f.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursive(child);
+                }
+            }
+        }
+        f.delete();
     }
 
     public static String deviceLabel() {
@@ -78,194 +119,35 @@ public class MsAccessPlugin extends Plugin {
         return "MS Study App";
     }
 
-    /**
-     * POST /validate for the given password. Handles session save/clear
-     * per the rules below. Never throws; network trouble is reported as
-     * "unavailable".
-     *
-     * Rules (mirrors PW, minus expiry):
-     *   - "valid" -> the caller saves {deviceId, role} (validate() does).
-     *   - "incorrect" / "kicked" -> definite failure, clear the session.
-     *   - "unavailable" -> clears the session only for a user-initiated
-     *     check (silent=false); silent revalidation keeps the session.
-     *   - "rate_limited" -> transient, never clears the session.
-     */
-    public static Validation validateNow(Context ctx, String password, boolean silent) {
-        if (password == null || password.trim().isEmpty()) {
-            return new Validation("incorrect", null, null);
-        }
-        synchronized (VALIDATE_LOCK) {
-            HttpURLConnection conn = null;
-            try {
-                String deviceId = MsSessionStore.getDeviceId(ctx);
-                JSONObject body = new JSONObject();
-                body.put("password", password.trim());
-                body.put("deviceId", deviceId);
-                body.put("deviceLabel", deviceLabel());
-                byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
-
-                URL url = new URL(VALIDATE_URL);
-                conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("POST");
-                conn.setConnectTimeout(15000);
-                conn.setReadTimeout(60000);
-                conn.setDoOutput(true);
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setRequestProperty("Accept", "application/json");
-                conn.setFixedLengthStreamingMode(bytes.length);
-                try (OutputStream os = conn.getOutputStream()) {
-                    os.write(bytes);
-                }
-                int code = conn.getResponseCode();
-                String text = readStream(code >= 200 && code < 300
-                        ? conn.getInputStream() : conn.getErrorStream());
-
-                String result = "unavailable";
-                String role = null;
-                try {
-                    JSONObject json = new JSONObject(text);
-                    result = json.optString("result", "unavailable");
-                    if (json.has("role") && !json.isNull("role")) {
-                        role = json.optString("role", null);
-                    }
-                } catch (Exception e) {
-                    result = "unavailable";
-                }
-                if (code == 429) {
-                    result = "rate_limited";
-                }
-                return handleResult(ctx, result, role, silent);
-            } catch (Exception e) {
-                // Network / IO failure: the server may just be waking up
-                // (Render free tier cold-starts).
-                if (!silent) {
-                    MsSessionStore.clear(ctx);
-                }
-                return new Validation("unavailable", null, null);
-            } finally {
-                if (conn != null) {
-                    conn.disconnect();
-                }
-            }
-        }
-    }
-
-    private static Validation handleResult(Context ctx, String result, String role, boolean silent) {
-        switch (result) {
-            case "valid":
-                // Do NOT save here: validate() saves after a valid result.
-                // This keeps one save path per caller.
-                return new Validation("valid", role != null ? role : "user", null);
-            case "incorrect":
-            case "kicked":
-                MsSessionStore.clear(ctx);
-                return new Validation(result, null, null);
-            case "rate_limited":
-                // Transient: keep the session, retry later.
-                return new Validation(result, null, null);
-            case "unavailable":
-            default:
-                if (!silent) {
-                    MsSessionStore.clear(ctx);
-                }
-                return new Validation("unavailable", null, null);
-        }
-    }
-
-    private static String readStream(InputStream in) {
-        if (in == null) {
-            return "";
-        }
-        try {
-            StringBuilder sb = new StringBuilder();
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(in, StandardCharsets.UTF_8));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    private static JSObject toJs(Validation v) {
+    /** Hidden-chat code: read the stored code (null if none set). */
+    @PluginMethod
+    public void getChatCode(PluginCall call) {
+        String code = MsSessionStore.readChatCode(getContext());
         JSObject ret = new JSObject();
-        ret.put("result", v.result);
-        if (v.role != null) {
-            ret.put("role", v.role);
-        }
-        if (v.message != null) {
-            ret.put("message", v.message);
-        }
-        return ret;
-    }
-
-    /** User-initiated check (login submit). Saves {deviceId, role} on valid. */
-    @PluginMethod
-    public void validate(PluginCall call) {
-        final String password = call.getString("password", "");
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                Validation v = validateNow(getContext(), password, false);
-                if ("valid".equals(v.result)) {
-                    MsSessionStore.save(getContext(),
-                            MsSessionStore.getDeviceId(getContext()), v.role);
-                }
-                call.resolve(toJs(v));
-            }
-        }).start();
-    }
-
-    /**
-     * Silent check (15s timer / resume). The password comes from JS
-     * memory — it is never stored natively, so it must be passed in.
-     * On "valid" the stored role is refreshed.
-     */
-    @PluginMethod
-    public void revalidate(PluginCall call) {
-        final String password = call.getString("password", "");
-        Boolean silentBox = call.getBoolean("silent", true);
-        final boolean silent = silentBox == null || silentBox;
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                if (password == null || password.isEmpty()) {
-                    call.resolve(toJs(new Validation("no_session", null, null)));
-                    return;
-                }
-                Validation v = validateNow(getContext(), password, silent);
-                if ("valid".equals(v.result)) {
-                    MsSessionStore.save(getContext(),
-                            MsSessionStore.getDeviceId(getContext()), v.role);
-                }
-                call.resolve(toJs(v));
-            }
-        }).start();
-    }
-
-    /** Current session state (no password is ever returned to JS). */
-    @PluginMethod
-    public void getSessionStatus(PluginCall call) {
-        MsSessionStore.Session session = MsSessionStore.read(getContext());
-        JSObject ret = new JSObject();
-        ret.put("hasSession", session != null);
-        if (session != null) {
-            ret.put("deviceId", session.deviceId);
-            ret.put("role", session.role);
+        if (code != null) {
+            ret.put("code", code);
         }
         call.resolve(ret);
     }
 
+    /** Hidden-chat code: store a new code (encrypted natively). */
     @PluginMethod
-    public void clearSession(PluginCall call) {
-        MsSessionStore.clear(getContext());
+    public void setChatCode(PluginCall call) {
+        String code = call.getString("code", "");
+        if (code != null && !code.isEmpty()) {
+            MsSessionStore.saveChatCode(getContext(), code);
+        }
         call.resolve();
     }
 
-    /** Device identity + label for JS (login POST fallback, admin calls). */
+    /** Hidden-chat code: clear it (used by "Change code"). */
+    @PluginMethod
+    public void clearChatCode(PluginCall call) {
+        MsSessionStore.clearChatCode(getContext());
+        call.resolve();
+    }
+
+    /** Device identity + label for JS. */
     @PluginMethod
     public void getDeviceInfo(PluginCall call) {
         JSObject ret = new JSObject();
@@ -279,5 +161,157 @@ public class MsAccessPlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("deviceId", MsSessionStore.getDeviceId(getContext()));
         call.resolve(ret);
+    }
+
+    /* ================= Web-bundle auto-update (v1.0.23) ================= */
+
+    /** Which www bundle (if any) is installed: { wwwBuild, path }. */
+    @PluginMethod
+    public void getWebBundleInfo(PluginCall call) {
+        SharedPreferences prefs = getContext()
+                .getSharedPreferences(WEBVIEW_PREFS_NAME, Activity.MODE_PRIVATE);
+        JSObject ret = new JSObject();
+        ret.put("wwwBuild", prefs.getInt(WWW_BUILD_KEY, 0));
+        String path = prefs.getString(CAP_SERVER_PATH, "");
+        if (path != null && !path.isEmpty()) {
+            ret.put("path", path);
+        }
+        call.resolve(ret);
+    }
+
+    /**
+     * Install a downloaded www ZIP as the app's web bundle.
+     * Args: fileName (in getCacheDir(), written by JS via Filesystem
+     * CACHE — same dir the APK updater uses), wwwBuild (integer, must be
+     * newer than the installed one — JS checks first), sha256 (hex of
+     * the ZIP as published in update/version.json).
+     *
+     * Steps, in order — the stored path is written ONLY at the end:
+     *  1. SHA-256 of the ZIP must match sha256 (else reject).
+     *  2. Unzip to www-bundle/.tmp-<build> (zip-slip guarded: every
+     *     entry must resolve inside the target dir).
+     *  3. index.html + app.js + styles.css + drive.js must exist.
+     *  4. Delete older www-bundle/<build> dirs, rename tmp dir into
+     *     place, persist serverBasePath + wwwBuild, delete the ZIP.
+     * Any failure rejects and leaves the previous bundle (or the APK's
+     * bundled www) exactly as it was.
+     */
+    @PluginMethod
+    public void installWebBundle(PluginCall call) {
+        String fileName = call.getString("fileName", "");
+        String sha256 = call.getString("sha256", "");
+        int wwwBuild = call.getInt("wwwBuild", 0);
+        if (fileName == null || fileName.isEmpty() || fileName.contains("/")
+                || fileName.contains("\\") || fileName.contains("..")) {
+            call.reject("Invalid fileName");
+            return;
+        }
+        if (wwwBuild <= 0 || sha256 == null || !sha256.matches("(?i)[0-9a-f]{64}")) {
+            call.reject("Invalid wwwBuild or sha256");
+            return;
+        }
+        File zipFile = new File(getContext().getCacheDir(), fileName);
+        if (!zipFile.exists()) {
+            call.reject("Bundle ZIP not found in cache: " + fileName);
+            return;
+        }
+        File root = new File(getContext().getFilesDir(), WWW_DIR_NAME);
+        File tmpDir = new File(root, ".tmp-" + wwwBuild);
+        File finalDir = new File(root, String.valueOf(wwwBuild));
+        try {
+            String actual = sha256Hex(zipFile);
+            if (!actual.equalsIgnoreCase(sha256)) {
+                call.reject("SHA-256 mismatch");
+                return;
+            }
+            deleteRecursive(tmpDir);
+            deleteRecursive(finalDir);
+            if (!tmpDir.mkdirs()) {
+                call.reject("Could not create staging dir");
+                return;
+            }
+            // Unzip with zip-slip guard.
+            ZipInputStream zin = new ZipInputStream(
+                    new BufferedInputStream(new FileInputStream(zipFile)));
+            try {
+                ZipEntry entry;
+                byte[] buf = new byte[8192];
+                String tmpCanonical = tmpDir.getCanonicalPath() + File.separator;
+                while ((entry = zin.getNextEntry()) != null) {
+                    File out = new File(tmpDir, entry.getName());
+                    if (!out.getCanonicalPath().startsWith(tmpCanonical)) {
+                        throw new IOException("Unsafe ZIP entry: " + entry.getName());
+                    }
+                    if (entry.isDirectory()) {
+                        out.mkdirs();
+                    } else {
+                        File parent = out.getParentFile();
+                        if (parent != null) {
+                            parent.mkdirs();
+                        }
+                        FileOutputStream fout = new FileOutputStream(out);
+                        try {
+                            int n;
+                            while ((n = zin.read(buf)) != -1) {
+                                fout.write(buf, 0, n);
+                            }
+                        } finally {
+                            fout.close();
+                        }
+                    }
+                    zin.closeEntry();
+                }
+            } finally {
+                zin.close();
+            }
+            for (String required : REQUIRED_WWW_FILES) {
+                if (!new File(tmpDir, required).isFile()) {
+                    deleteRecursive(tmpDir);
+                    call.reject("Bundle missing required file: " + required);
+                    return;
+                }
+            }
+            // Validation passed: retire older builds, publish this one.
+            File[] old = root.listFiles();
+            if (old != null) {
+                for (File child : old) {
+                    if (!child.equals(tmpDir)) {
+                        deleteRecursive(child);
+                    }
+                }
+            }
+            if (!tmpDir.renameTo(finalDir)) {
+                deleteRecursive(tmpDir);
+                call.reject("Could not publish bundle");
+                return;
+            }
+            SharedPreferences prefs = getContext()
+                    .getSharedPreferences(WEBVIEW_PREFS_NAME, Activity.MODE_PRIVATE);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString(CAP_SERVER_PATH, finalDir.getAbsolutePath());
+            editor.putInt(WWW_BUILD_KEY, wwwBuild);
+            editor.apply();
+            zipFile.delete();
+            JSObject ret = new JSObject();
+            ret.put("wwwBuild", wwwBuild);
+            ret.put("path", finalDir.getAbsolutePath());
+            call.resolve(ret);
+        } catch (Exception e) {
+            deleteRecursive(tmpDir);
+            call.reject("Could not install web bundle: " + e.getMessage());
+        }
+    }
+
+    /** Remove any downloaded bundle; the next launch serves bundled www. */
+    @PluginMethod
+    public void clearWebBundle(PluginCall call) {
+        SharedPreferences prefs = getContext()
+                .getSharedPreferences(WEBVIEW_PREFS_NAME, Activity.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString(CAP_SERVER_PATH, "");
+        editor.putInt(WWW_BUILD_KEY, 0);
+        editor.apply();
+        deleteRecursive(new File(getContext().getFilesDir(), WWW_DIR_NAME));
+        call.resolve();
     }
 }

@@ -6,8 +6,6 @@ import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 
-import org.json.JSONObject;
-
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.util.UUID;
@@ -18,107 +16,81 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
 /**
- * Encrypted storage for the MS Study session (Phase 1).
+ * Encrypted storage for MS Study (no-password build, v1.0.23).
  *
- * Mirrors the PW app's PwSessionStore EXACTLY in mechanism (same file:
+ * Mirrors the PW app's PwSessionStore in mechanism (same file:
  * pw-apk/app/android/app/src/main/java/com/kiara/pw/PwSessionStore.java):
  *   - AES-256/GCM key held in the Android Keystore; only the ciphertext
  *     (Base64(iv || ciphertext)) lives in SharedPreferences.
  *   - Capacitor Preferences is NOT encrypted, so it must never hold
  *     session data.
  *
- * Differences from PW (deliberate, per the MS Study spec):
- *   - The session holds {deviceId, role} ONLY — NO password, NO expiry.
- *     The password lives in JS memory only (app.js) and is never stored.
- *     A fresh launch therefore always asks for the password again.
- *   - The device identity is a UUID generated ONCE and stored encrypted
- *     here — NOT the Android ID. (PW uses the Android ID because its
- *     customers' passwords were already bound to it; MS Study has no
- *     such legacy binding, so a stable random UUID is used instead.
- *     The storage mechanism is the same one PW uses for its fallback id.)
+ * No-password model: there is no login session and no access password
+ * anymore — the old {deviceId, role} session (save/read/clear) and the
+ * password store (savePassword/readPassword/clearPassword) were removed
+ * with the login system. Only two things live here now:
+ *   - the device identity: a UUID generated ONCE and stored encrypted
+ *     (getDeviceId) — this IS the identity the server accepts.
+ *   - the hidden-chat code (saveChatCode/readChatCode/clearChatCode):
+ *     the chat code is separate from login and is untouched.
  */
 public final class MsSessionStore {
 
     private static final String PREFS = "msstudy.access.session.v1";
-    private static final String KEY_SESSION = "session";
     private static final String KEY_DEVICE_ID = "msstudy.installation.device.v1";
     private static final String KEY_ALIAS = "msstudy.access.key.v1";
     private static final String ANDROID_KEYSTORE = "AndroidKeyStore";
-    private static final long CACHE_TTL_MS = 5000;
 
-    public static final class Session {
-        public final String deviceId;
-        public final String role;
-
-        public Session(String deviceId, String role) {
-            this.deviceId = deviceId;
-            this.role = role;
-        }
-    }
-
-    private static Session cachedSession;
-    private static long cachedAtMs;
     private static String cachedDeviceId;
 
     private MsSessionStore() {}
 
-    public static synchronized void save(Context ctx, String deviceId, String role) {
+    /**
+     * The hidden-chat code, AES-256/GCM encrypted (same key/mechanism
+     * as before). The chat code is the pairing key, so it must
+     * survive app updates — WebView localStorage is not reliable
+     * enough for it. Stored here on first set; read on every chat
+     * open. It is cleared only by "Change code".
+     */
+    private static final String KEY_CHAT_CODE = "chat_code";
+
+    public static synchronized void saveChatCode(Context ctx, String code) {
         try {
-            JSONObject json = new JSONObject();
-            json.put("deviceId", deviceId);
-            json.put("role", role);
-            String encrypted = encrypt(json.toString());
+            if (code == null || code.isEmpty()) {
+                return;
+            }
+            String encrypted = encrypt(code);
             if (encrypted == null) {
                 return;
             }
             ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    .edit().putString(KEY_SESSION, encrypted).apply();
-            cachedSession = new Session(deviceId, role);
-            cachedAtMs = System.currentTimeMillis();
+                    .edit().putString(KEY_CHAT_CODE, encrypted).apply();
         } catch (Exception e) {
-            // Never crash the app for storage trouble; the caller treats a
-            // missing session as "not logged in".
-            clear(ctx);
+            // Never crash the app for storage trouble.
         }
     }
 
-    public static synchronized Session read(Context ctx) {
-        if (cachedSession != null && System.currentTimeMillis() - cachedAtMs < CACHE_TTL_MS) {
-            return cachedSession;
-        }
-        cachedSession = null;
+    public static synchronized String readChatCode(Context ctx) {
         try {
             String encrypted = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    .getString(KEY_SESSION, null);
+                    .getString(KEY_CHAT_CODE, null);
             if (encrypted == null) {
                 return null;
             }
             String plain = decrypt(encrypted);
-            if (plain == null) {
-                clear(ctx);
+            if (plain == null || plain.isEmpty()) {
                 return null;
             }
-            JSONObject json = new JSONObject(plain);
-            String deviceId = json.optString("deviceId", null);
-            String role = json.optString("role", "user");
-            if (deviceId == null || deviceId.isEmpty()) {
-                clear(ctx);
-                return null;
-            }
-            cachedSession = new Session(deviceId, role);
-            cachedAtMs = System.currentTimeMillis();
-            return cachedSession;
+            return plain;
         } catch (Exception e) {
-            clear(ctx);
             return null;
         }
     }
 
-    public static synchronized void clear(Context ctx) {
-        cachedSession = null;
+    public static synchronized void clearChatCode(Context ctx) {
         try {
             ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    .edit().remove(KEY_SESSION).apply();
+                    .edit().remove(KEY_CHAT_CODE).apply();
         } catch (Exception e) {
             // Best effort only.
         }
